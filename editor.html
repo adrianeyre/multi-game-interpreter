@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#d8a657" />
+    <meta name="color-scheme" content="dark" />
+
+    <title>MGI Web Editor — build a point-and-click adventure in your browser</title>
+    <meta
+      name="description"
+      content="A visual editor for classic adventure games: paint rooms, place objects, draw walk boxes and sprites, import audio, and play the compiled game without leaving the page."
+    />
+    <link rel="canonical" href="https://adrianeyre.github.io/multi-game-interpreter/editor.html" />
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MGI Web" />
+    <meta
+      property="og:title"
+      content="MGI Web Editor — build a point-and-click adventure in your browser"
+    />
+    <meta
+      property="og:description"
+      content="A visual editor for classic adventure games: paint rooms, place objects, draw walk boxes and sprites, import audio, and play the compiled game without leaving the page."
+    />
+    <meta
+      property="og:url"
+      content="https://adrianeyre.github.io/multi-game-interpreter/editor.html"
+    />
+    <meta
+      property="og:image"
+      content="https://adrianeyre.github.io/multi-game-interpreter/og-image.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="MGI Web — a multi-engine adventure interpreter and editor that runs in your browser"
+    />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="MGI Web Editor — build a point-and-click adventure in your browser"
+    />
+    <meta
+      name="twitter:description"
+      content="A visual editor for classic adventure games: paint rooms, place objects, draw walk boxes and sprites, import audio, and play the compiled game without leaving the page."
+    />
+    <meta
+      name="twitter:image"
+      content="https://adrianeyre.github.io/multi-game-interpreter/og-image.png"
+    />
+
+    <link rel="stylesheet" href="/src/editor/editor.css" />
+  </head>
+  <body>
+    <!--
+      2.4.1, Bypass Blocks. The editor's title bar is eight controls and its
+      sidebar is a whole resource tree; without this, reaching the canvas by
+      keyboard means walking both on every load.
+    -->
+    <a class="skip-link" href="#editor-canvas-area">Skip to the editing area</a>
+
+    <!--
+      The page's one `<h1>`. The editor builds its chrome in script and had no
+      heading at all, so a screen reader's document outline began at the `<h3>`
+      of a sidebar section — and "what is this page" had no answer.
+    -->
+    <h1 class="visually-hidden">MGI Web editor</h1>
+
+    <div id="editor"></div>
+
+    <!--
+      Shown only when arriving from the player's "Edit game…", which hands over
+      a decompiled project this page then has to rebuild. Marked up here and
+      unhidden by a plain inline script so it paints with the first frame: the
+      editor bundle is a deferred module, and waiting for it would leave the
+      screen blank for exactly the stretch this covers.
+    -->
+    <div id="boot-busy" class="busy-overlay" role="status" aria-live="polite" hidden>
+      <div class="busy-spinner" aria-hidden="true"></div>
+      <p class="busy-message">Opening the decompiled game…</p>
+      <p class="busy-hint">Rebuilding the rooms, costumes and scripts as an editable project.</p>
+    </div>
+    <script>
+      if (new URLSearchParams(location.search).has('imported')) {
+        document.getElementById('boot-busy').hidden = false;
+      }
+    </script>
+
+    <script type="module" src="/src/editor/main.ts"></script>
+  </body>
+</html>

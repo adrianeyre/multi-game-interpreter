@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://adrianeyre.github.io/multi-game-interpreter/sitemap.xml

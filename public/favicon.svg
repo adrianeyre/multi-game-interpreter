@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MGI Web">
+  <rect width="512" height="512" rx="113" fill="#101014"/>
+  <path d="M61 205a72 72 0 0 1 72-72h246a72 72 0 0 1 72 72v98a72 72 0 0 1-72 72H196l-63 62v-62h-0a72 72 0 0 1-72-72z" fill="#d8a657"/>
+  <g fill="#101014">
+    <circle cx="171" cy="254" r="23"/>
+    <circle cx="256" cy="254" r="23"/>
+    <circle cx="341" cy="254" r="23"/>
+  </g>
+</svg>

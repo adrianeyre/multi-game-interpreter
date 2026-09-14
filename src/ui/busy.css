@@ -1,0 +1,90 @@
+/*
+ * The working overlay: the screen goes dark and a spinner turns.
+ *
+ * For work that blocks the page for seconds rather than milliseconds —
+ * decompiling a game, then the editor booting on the far side of it. A thin
+ * progress bar in a footer is not enough for that: it is six pixels of colour
+ * somewhere the eye is not, and a page that has stopped responding while it
+ * fills reads as a page that has broken.
+ */
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  /*
+   * `place-items` centres each row's contents inside its own track; the stack
+   * of tracks is what needs centring in the viewport, and that is
+   * `place-content`. Without it the rows pack to the top and the spinner turns
+   * over the toolbar, which reads as a stray graphic rather than a screen that
+   * has been taken over.
+   */
+  place-content: center;
+  place-items: center;
+  gap: 1.5rem;
+  grid-auto-rows: min-content;
+  padding: 2rem;
+  background: rgb(8 8 11 / 82%);
+  text-align: center;
+}
+
+.busy-overlay[hidden] {
+  display: none;
+}
+
+/*
+ * Rotation and opacity only, and nothing else in this overlay animates.
+ * The work behind it holds the main thread for its whole duration, so a
+ * spinner the browser cannot hand to the compositor would freeze exactly when
+ * it is needed — a still spinner being the one thing worse than none.
+ */
+.busy-spinner {
+  width: 84px;
+  height: 84px;
+  border: 6px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: busy-spin 0.9s linear infinite;
+  will-change: transform;
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busy-message {
+  max-width: 32rem;
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.busy-hint {
+  max-width: 32rem;
+  margin: -0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* A ring that pulses rather than turns still says "working" without moving
+   anything across the screen. */
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border-color: var(--accent);
+    animation: busy-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes busy-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+
+    50% {
+      opacity: 1;
+    }
+  }
+}

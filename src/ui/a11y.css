@@ -1,0 +1,244 @@
+/*
+ * The accessibility floor, shared by the player and the editor.
+ *
+ * Everything here is a WCAG 2.2 Level AA requirement that is the same wherever
+ * it applies, so it is written once rather than per stylesheet: the focus ring,
+ * the skip link, the minimum target size, the reduced-motion and forced-colours
+ * behaviours, and the visually-hidden class the live regions and canvas
+ * descriptions are built out of.
+ *
+ * The two stylesheets that import this then only carry what is genuinely their
+ * own surface's business.
+ */
+
+:root {
+  /*
+   * The focus ring is two colours on purpose.
+   *
+   * 1.4.11 wants the indicator to reach 3:1 against what is next to it, and a
+   * single colour cannot: an accent ring vanishes on an accent-filled button,
+   * and a white ring is 2.1:1 against that same accent. A light band with a
+   * dark band outside it is contrasty against every surface in this project,
+   * because whatever the ring is sitting on, one of the two bands is against it.
+   */
+  --focus-ring: #ffffff;
+  --focus-halo: #08080b;
+
+  /*
+   * The boundary of anything you can operate.
+   *
+   * `--border` is 1.26:1 against the panel it is drawn on, which is fine for a
+   * rule between two blocks of text and is not fine for the edge of a button:
+   * 1.4.11 asks for 3:1 from the visual boundary of a control. So controls get
+   * their own token, and the decorative separators keep the quiet one.
+   */
+  --control-edge: #6f6f80;
+
+  /*
+   * 2.5.8 asks 24x24 CSS pixels of any control, and this is that number in one
+   * place so the rules below and the components that opt out of them cannot
+   * drift apart.
+   */
+  --target-min: 24px;
+}
+
+/* ------------------------------------------------------------ focus ring -- */
+
+/*
+ * `:focus-visible` rather than `:focus`: a ring that appears on every mouse
+ * click is the reason authors remove focus rings, and removing the ring is the
+ * failure this rule exists to prevent.
+ */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 7px var(--focus-halo);
+  /*
+   * 2.4.11, Focus Not Obscured. Both pages put a sticky bar at the top and
+   * another at the bottom, and a browser scrolling a newly focused control to
+   * the very edge of the viewport parks it underneath one of them. The margins
+   * are what keep a focused thing clear of both.
+   */
+  scroll-margin-block: 5rem;
+  /* Above whatever it is next to, so the halo is not clipped by a sibling. */
+  position: relative;
+  z-index: 1;
+}
+
+/*
+ * A canvas is the one control whose own content must stay visible under the
+ * ring, so it takes the ring outside its box rather than over it.
+ */
+canvas:focus-visible {
+  outline-offset: 3px;
+}
+
+/* ------------------------------------------------------------- skip link -- */
+
+/*
+ * 2.4.1, Bypass Blocks. Both pages open with a toolbar of a dozen controls, and
+ * without this a keyboard user walks all of them on every page load to reach
+ * the thing the page is for.
+ *
+ * Off-screen until focused rather than hidden: a skip link that is
+ * `display: none` is not focusable, so it is not a skip link.
+ */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 200;
+  padding: 0.6rem 1rem;
+  color: #101014;
+  background: var(--accent, #d8a657);
+  border-radius: 0 0 8px 0;
+  font-weight: 600;
+  text-decoration: none;
+  /* Moved rather than hidden, so it keeps its place in the tab order. */
+  transform: translateY(-120%);
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* --------------------------------------------------------- visually hidden */
+
+/*
+ * On the page for a screen reader, off it for everyone else.
+ *
+ * The clip-rect technique rather than `display: none` or `visibility: hidden`,
+ * both of which remove the element from the accessibility tree as well as from
+ * the screen — which would defeat the entire point. 1px rather than 0, because
+ * a zero-sized element is dropped by some screen readers.
+ */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/*
+ * The same, until it is focused — for a description that should be reachable
+ * by keyboard but is noise on screen, like a canvas' key map.
+ */
+.visually-hidden-focusable:not(:focus):not(:focus-within) {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+/* ----------------------------------------------------------- target size -- */
+
+/*
+ * 2.5.8, Target Size (Minimum): 24x24 CSS pixels.
+ *
+ * Applied to the controls rather than to a wrapper, and written as a minimum
+ * rather than a size, so a button that is already comfortably bigger is left
+ * alone. The exceptions are marked in the stylesheets that need them —
+ * `.swatch` and the AGI cel grid, where the cell *is* the pixel it edits and
+ * the size is essential to what is being shown.
+ */
+button,
+select,
+summary,
+[role='button'],
+[role='tab'],
+[role='option'],
+[role='radio'],
+input[type='checkbox'],
+input[type='radio'],
+input[type='file'],
+input[type='color'] {
+  min-height: var(--target-min);
+}
+
+button,
+select,
+[role='button'],
+[role='tab'] {
+  min-width: var(--target-min);
+}
+
+/*
+ * The two checkboxes this project uses are the browser's own, which render at
+ * 13px. Scaling the box rather than padding a wrapper keeps the *target* at 24
+ * rather than only the label around it.
+ */
+input[type='checkbox'],
+input[type='radio'] {
+  width: var(--target-min);
+  height: var(--target-min);
+  accent-color: var(--accent, #d8a657);
+}
+
+/* ------------------------------------------------------------ motion ------ */
+
+/*
+ * 2.3.3 is AAA and this project meets it anyway: nothing here needs to move.
+ * The rule that matters at AA is 2.2.2 — the spinner and the progress sweep are
+ * the only things that animate, both are decorative, and both stop here.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Named exceptions: these two say "working", and a still one says nothing.
+     They are re-given a non-moving animation by their own stylesheets. */
+  .busy-spinner {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* ---------------------------------------------------------- forced colours */
+
+/*
+ * Windows High Contrast and friends replace the palette outright, and a focus
+ * ring drawn in `--focus-ring` is one of the colours they replace. The system
+ * keywords are the only thing guaranteed to survive.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  /*
+   * Selection in this project is shown with a background or an accent colour,
+   * both of which are flattened away here. An outline is not.
+   */
+  .selected,
+  [aria-selected='true'],
+  [aria-pressed='true'],
+  [aria-checked='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .skip-link {
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid CanvasText;
+  }
+}

@@ -1,0 +1,96 @@
+/*
+ * The dismissible notice.
+ *
+ * Deliberately unlike the busy overlay: that one is a state the page is in and
+ * cannot be dismissed, this one is a message waiting to be read. It gets a
+ * panel, a heading and a button, because the thing it usually carries — why a
+ * game cannot be edited — is several paragraphs and a suggestion.
+ */
+
+.notice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: grid;
+  place-content: center;
+  padding: 2rem;
+  background: rgb(8 8 11 / 82%);
+}
+
+.notice-overlay[hidden] {
+  display: none;
+}
+
+.notice-panel {
+  display: grid;
+  gap: 1rem;
+  max-width: 38rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+.notice-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.notice-body {
+  /* The explanation is the point, so it is allowed to be long — and to scroll
+     rather than push its own dismiss button off the bottom of a short window. */
+  max-height: 55vh;
+  overflow-y: auto;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.notice-body p {
+  margin: 0 0 0.75rem;
+}
+
+.notice-body p:last-child {
+  margin-bottom: 0;
+}
+
+.notice-dismiss {
+  justify-self: end;
+}
+
+/*
+ * The choices, when a notice asks rather than tells.
+ *
+ * Below the explanation and above the buttons, because what is being agreed to
+ * is the explanation — a control placed above it would be a decision offered
+ * before its reasons.
+ */
+.notice-form {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.notice-form[hidden] {
+  display: none;
+}
+
+.notice-field {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.notice-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.notice-confirm[hidden] {
+  display: none;
+}

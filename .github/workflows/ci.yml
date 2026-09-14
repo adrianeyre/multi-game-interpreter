@@ -1,0 +1,195 @@
+name: CI
+
+# Only on pull requests. A `push` trigger as well would double every run for
+# any branch that has a PR open, since both events fire for the same commit.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # The SCI round trip, through the command rather than in process.
+      #
+      # `npm run fixture` writes the four SCI installs a fixture builder can
+      # build, and `reexport:sci` exports each one with nothing edited, packs
+      # the result with `packSciGame` and reads the packed install back through
+      # `SciResources` — the engine's own reader — exiting non-zero if a
+      # resource comes back as different bytes or the container reads back as a
+      # different map structure.
+      #
+      # Four builders, but **three** map structures of the six
+      # `detectMapVersion` tells apart: they pack into `sci0-sci1-early`,
+      # `sci11` and `sci2`, and the SCI32 and SCI3 builders both land on `sci2`
+      # because the container does not separate those two — a SCI3 game ships
+      # the SCI32 map. SCI1 middle, SCI1 late and the FM-Towns map have no
+      # fixture builder and so are never reached from here; they are packed and
+      # read back in process by `tests/sci-packing.test.ts` instead, which is
+      # where the claim that the packer produces all six actually rests.
+      #
+      # Tier 1, and the limit is the one `docs/processes/verifying-version-
+      # support.md` names: a fixture encodes this project's reading of the
+      # format, so what this establishes is that the writer and the reader agree
+      # over those three, and that the command itself still runs. It establishes
+      # nothing about a game Sierra shipped, and no SCI data may be fetched here
+      # to change that — unlike Revolution's two, none of it is free.
+      #
+      # `tests/sci-packing.test.ts` checks the same round trip in process. This
+      # runs beside it because the command has parts no test covers: the
+      # argument parsing, `openGame` over a real folder, and the exit code a
+      # person or a later job would act on.
+      - name: SCI round trip over the fixture installs
+        run: |
+          for layout in sci0 sci1-1 sci32 sci3; do
+            npm run fixture -- sci "$layout" "/tmp/sci-fixtures/$layout"
+            npm run reexport:sci -- "/tmp/sci-fixtures/$layout"
+          done
+
+  # The one job in this project that runs against real, shipped game data.
+  #
+  # `docs/processes/verifying-version-support.md` says CI can never assert
+  # Completable because game data cannot live in this repository. The data still
+  # cannot — nothing here is committed or cached — but Revolution released both
+  # their adventures as freeware in 2003, so a build machine may lawfully fetch
+  # them, and that makes these two the only games this project can check against
+  # bytes nobody here wrote (#266, ADRs 0023 and 0026).
+  #
+  # It runs beside `verify` rather than after it: a fetch failure is a broken
+  # link at ScummVM's end, and it should not hide a lint error.
+  virtual-theatre:
+    name: Virtual Theatre — sweep every fetchable release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The URLs and the licence are written here rather than in the fetch
+      # script, which takes them as arguments on purpose: "freely
+      # redistributable" is a claim about a *specific release*, and making the
+      # licence an argument is what makes stating it the act of having checked.
+      # A reviewer of this file is the person doing the checking.
+      - name: Fetch Lure of the Temptress
+        run: >
+          npm run fetch:vt --
+          "https://downloads.scummvm.org/frs/extras/Lure%20of%20the%20Temptress/lure-1.1.zip"
+          lure
+          "Freeware, released by Revolution Software in 2003 through ScummVM"
+
+      - name: Fetch Beneath a Steel Sky (floppy)
+        run: >
+          npm run fetch:vt --
+          "https://downloads.scummvm.org/frs/extras/Beneath%20a%20Steel%20Sky/BASS-Floppy-1.3.zip"
+          bass-floppy
+          "Freeware, released by Revolution Software in 2003 through ScummVM"
+
+      # 68 MB, and worth it: this is the only release that ships sky.cpt, so it
+      # is the only one that can check the Compact table reader — and the
+      # Compacts are the game's world (ADR 0024). The floppy is fetched as well
+      # rather than instead, because the two index files differ by a factor of
+      # six in size and that difference is what caught a 16-bit reading that
+      # fitted one of them.
+      - name: Fetch Beneath a Steel Sky (CD)
+        run: >
+          npm run fetch:vt --
+          "https://downloads.scummvm.org/frs/extras/Beneath%20a%20Steel%20Sky/bass-cd-1.2.zip"
+          bass-cd
+          "Freeware, released by Revolution Software in 2003 through ScummVM"
+
+      # The fourth release, and the one that is not a full game. It is worth
+      # fetching for two reasons the others cannot supply. Its index holds 247
+      # entries against the floppy's 1,445 and the CD's 5,097, which extends the
+      # scale spread that caught the 16-bit reading by another order of
+      # magnitude downwards. And it ships SKY.EXE, so it is a release the
+      # executable-resident Compact reader could be checked against when
+      # somebody writes one — ADR 0024's fifth amendment is about how long the
+      # opposite was believed, and a job that fetches this every run is what
+      # stops that premise decaying again unnoticed.
+      - name: Fetch Beneath a Steel Sky (DOS demo)
+        run: >
+          npm run fetch:vt --
+          "https://downloads.scummvm.org/frs/demos/sky/sky-dos-v0267-demo-en.zip"
+          bass-demo
+          "Freeware demo, distributed by ScummVM with Revolution Software's blessing"
+
+      - name: Unpack into the runner's workspace
+        run: |
+          mkdir -p games/lure-of-the-temptress games/beneath-a-steel-sky games/beneath-a-steel-sky-cd games/beneath-a-steel-sky-demo
+          unzip -qo games/lure.zip -d /tmp/lure
+          cp /tmp/lure/lure/* games/lure-of-the-temptress/
+          unzip -qo games/bass-floppy.zip -d games/beneath-a-steel-sky/
+          unzip -qo games/bass-cd.zip -d /tmp/bass-cd
+          cp /tmp/bass-cd/bass-cd-1.2/* games/beneath-a-steel-sky-cd/
+          unzip -qo games/bass-demo.zip -d games/beneath-a-steel-sky-demo/
+
+      - name: Sweep all four releases against their own bytes
+        run: |
+          npm run sweep:vt -- games/lure-of-the-temptress
+          npm run sweep:vt -- games/beneath-a-steel-sky
+          npm run sweep:vt -- games/beneath-a-steel-sky-cd
+          npm run sweep:vt -- games/beneath-a-steel-sky-demo
+
+      # Every release, including the three this project refuses. A refusal is
+      # part of what CI checks here, not a gap in it: `play:vt` exits zero
+      # having named the file or the interpreter it needs, and the day one of
+      # those refusals turns into a stack trace is the day this line earns its
+      # place. Only one of the four gets past `refused` today.
+      - name: Report how far a playthrough reaches
+        run: |
+          npm run play:vt -- games/lure-of-the-temptress
+          npm run play:vt -- games/beneath-a-steel-sky
+          npm run play:vt -- games/beneath-a-steel-sky-cd
+          npm run play:vt -- games/beneath-a-steel-sky-demo
+
+      # The rule that no game data lives in this repository does not bend for a
+      # permissive licence. If a fetch ever wrote somewhere tracked, this fails
+      # the run rather than letting a commit carry somebody else's game.
+      - name: Nothing fetched was committed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Fetched data reached tracked paths:"
+            git status --porcelain
+            exit 1
+          fi

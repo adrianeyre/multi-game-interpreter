@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#d8a657" />
+    <meta name="color-scheme" content="dark" />
+
+    <title>MGI Web — play and make classic adventure games in your browser</title>
+    <meta
+      name="description"
+      content="MGI — Multi Game Interpreter — runs LucasArts SCUMM and Sierra AGI adventure games, with a visual game editor, entirely in your browser. Play from your own files, or build a point-and-click adventure of your own. Nothing is uploaded."
+    />
+    <link rel="canonical" href="https://adrianeyre.github.io/multi-game-interpreter/" />
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MGI Web" />
+    <meta
+      property="og:title"
+      content="MGI Web — play and make classic adventure games in your browser"
+    />
+    <meta
+      property="og:description"
+      content="MGI — Multi Game Interpreter — runs LucasArts SCUMM and Sierra AGI adventure games, with a visual game editor, entirely in your browser. Play from your own files, or build a point-and-click adventure of your own. Nothing is uploaded."
+    />
+    <meta property="og:url" content="https://adrianeyre.github.io/multi-game-interpreter/" />
+    <meta
+      property="og:image"
+      content="https://adrianeyre.github.io/multi-game-interpreter/og-image.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="MGI Web — a multi-engine adventure interpreter and editor that runs in your browser"
+    />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="MGI Web — play and make classic adventure games in your browser"
+    />
+    <meta
+      name="twitter:description"
+      content="MGI — Multi Game Interpreter — runs LucasArts SCUMM and Sierra AGI adventure games, with a visual game editor, entirely in your browser. Play from your own files, or build a point-and-click adventure of your own. Nothing is uploaded."
+    />
+    <meta
+      name="twitter:image"
+      content="https://adrianeyre.github.io/multi-game-interpreter/og-image.png"
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "MGI Web",
+        "url": "https://adrianeyre.github.io/multi-game-interpreter/",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Any browser",
+        "description": "MGI — Multi Game Interpreter — runs LucasArts SCUMM and Sierra AGI adventure games, with a visual game editor, entirely in your browser. Play from your own files, or build a point-and-click adventure of your own. Nothing is uploaded.",
+        "author": { "@type": "Person", "name": "Adrian Eyre" },
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "softwareHelp": "https://github.com/adrianeyre/multi-game-interpreter#readme"
+      }
+    </script>
+
+    <link rel="stylesheet" href="/src/ui/styles.css" />
+  </head>
+  <body>
+    <!--
+      2.4.1, Bypass Blocks. The title bar is a dozen controls and it is the
+      first thing in the tab order on every load; this is the way past it.
+      Off-screen until focused, never `display: none`, because a skip link that
+      cannot be focused is not one.
+    -->
+    <a class="skip-link" href="#main-content">Skip to the game</a>
+
+    <div id="app">
+      <header class="topbar">
+        <h1>MGI<span>web</span></h1>
+        <!--
+          A named group, not a `toolbar`.
+
+          `role="toolbar"` sounds right and brings an expectation with it: a
+          screen reader announces "toolbar" and the reader reaches for the arrow
+          keys, because that is the pattern's own contract. This row is a
+          button, a checkbox, a select and six more buttons — a set of unrelated
+          controls rather than one composite widget — so it takes the role that
+          names it without promising a keyboard model it does not implement.
+        -->
+        <div class="controls" role="group" aria-label="Game controls">
+          <button
+            id="releases-button"
+            type="button"
+            aria-haspopup="dialog"
+            title="Every SCUMM and Sierra release, by version"
+          >
+            Releases
+          </button>
+          <button id="pick-folder" type="button">Open game folder…</button>
+          <input
+            id="file-input"
+            type="file"
+            multiple
+            webkitdirectory
+            class="visually-hidden"
+            tabindex="-1"
+            aria-hidden="true"
+          />
+          <button id="pick-files" type="button">Open files…</button>
+          <input
+            id="file-input-flat"
+            type="file"
+            multiple
+            class="visually-hidden"
+            tabindex="-1"
+            aria-hidden="true"
+          />
+          <label class="toggle" for="sound-toggle">
+            <input id="sound-toggle" type="checkbox" checked />
+            Sound
+          </label>
+          <!--
+            A real label rather than the `title` this carried before. `title` is
+            an accessible name of last resort: it is not shown on touch, not
+            shown to a keyboard user, and several screen readers ignore it when
+            anything else is available.
+          -->
+          <label class="toggle" for="scale-select">
+            <span class="visually-hidden">Display scale</span>
+            <select id="scale-select">
+              <option value="0">Fit</option>
+              <option value="1">1×</option>
+              <option value="2" selected>2×</option>
+              <option value="3">3×</option>
+              <option value="4">4×</option>
+            </select>
+          </label>
+          <button id="pause-button" type="button" disabled>Pause</button>
+          <button
+            id="fullscreen-button"
+            type="button"
+            disabled
+            aria-pressed="false"
+            title="Fill the screen (Escape to leave)"
+          >
+            Fullscreen
+          </button>
+          <button
+            id="save-game"
+            type="button"
+            disabled
+            aria-haspopup="dialog"
+            title="Save your progress into one of ten slots"
+          >
+            Save
+          </button>
+          <!--
+            Load reads saves back; Boot shows and hides the game. They were one
+            button called Load, which did the second job under the first job's
+            name — so a player looking for their saved games pressed it and the
+            file section disappeared.
+
+            Not disabled while no game is running: the whole point of this menu
+            is to reach a game you saved in an earlier visit, and requiring a
+            loaded game before you may look at your saves is the deadlock the
+            single button already had.
+          -->
+          <button
+            id="load-game"
+            type="button"
+            aria-haspopup="dialog"
+            title="Resume a game you saved earlier"
+          >
+            Load
+          </button>
+          <button
+            id="boot-game"
+            type="button"
+            aria-pressed="false"
+            title="Show the game, hiding the file section"
+          >
+            Boot
+          </button>
+          <button
+            id="edit-game"
+            type="button"
+            disabled
+            title="Decompile this game and open it in the editor"
+          >
+            Edit game…
+          </button>
+          <a class="button-link" href="./editor.html">Make a game →</a>
+        </div>
+      </header>
+
+      <!--
+        `tabindex="-1"` so the skip link above can actually put focus here.
+        Without it the browser scrolls to the target and leaves focus at the top
+        of the document, which is the failure mode that makes skip links look
+        like they do nothing.
+      -->
+      <main id="main-content" class="main" tabindex="-1">
+        <section id="dropzone" class="dropzone" aria-labelledby="dropzone-heading">
+          <div class="dropzone-inner">
+            <h2 id="dropzone-heading">Drop your game files here</h2>
+            <p>
+              This is an interpreter, not a game. It needs the data files from a copy of a game that
+              you own. Eight engine families are recognised, and the files decide which one answers
+              — you are never asked to pick.
+            </p>
+            <!--
+              One entry per Engine family in `src/engine/loadEngine.ts`, and
+              nothing but the engines: a player's question here is "will it read
+              my files?", and the answer is a family and a version range. Game
+              titles were tried and removed — a list of names is longer, dates
+              the moment somebody's favourite is missing from it, and answers a
+              question the Releases dialog already answers properly.
+
+              Left-aligned inside a centred box: centred bullets are hard to
+              scan down, which is the one thing this list exists to be.
+            -->
+            <!--
+              Closed by default, because the paragraph above already answers the
+              question most people arrive with — "what do I do here?" — and eight
+              families of prose underneath it buries the drop zone that is the
+              answer. Somebody asking the narrower question, "is my game one of
+              these?", opens it.
+
+              A native `<details>` rather than a scripted panel: it opens with no
+              JavaScript, it is a disclosure widget to a screen reader without
+              any ARIA, and Enter and Space work on the summary because the
+              element is a button already.
+            -->
+            <details class="engine-details">
+              <summary>Supported Engines</summary>
+              <ul class="engine-list">
+                <li><strong>LucasArts SCUMM</strong> &mdash; all seven Versions, v2 through v8.</li>
+                <li>
+                  <strong>Sierra AGI</strong> &mdash; both packaging majors, v2 and v3, over the six
+                  interpreter builds this project tells apart.
+                </li>
+                <li>
+                  <strong>Sierra SCI</strong> &mdash; all thirteen Versions, SCI0 early through
+                  SCI3. A game reaches its own dialog loop and runs it; the interface those scripts
+                  draw is not drawn here yet, so there is nothing on screen to answer.
+                </li>
+                <li>
+                  <strong>Adventure Soft AGOS</strong> &mdash; all seven of its Versions, each named
+                  after its game rather than numbered: Elvira 1, Elvira 2, Waxworks, Simon 1, Simon
+                  2, The Feeble Files and the Puzzle Pack. AGOS keeps its font in the original
+                  interpreter executable, so game data alone draws no text.
+                </li>
+                <li>
+                  <strong>Revolution&rsquo;s Sky</strong> &mdash; all three Releases of Beneath a
+                  Steel Sky: the demo, the floppy and the CD. It reaches a room and runs the
+                  game&rsquo;s scripts; nothing plays through yet, and it says where it stopped
+                  rather than showing you a black screen.
+                </li>
+                <li>
+                  <strong>Revolution&rsquo;s Lure</strong> &mdash; both Releases of Lure of the
+                  Temptress, the demo and the floppy. It reads the game and the world state a new
+                  game starts from, and its own bytecode is a separate system this project does not
+                  run yet.
+                </li>
+                <li>
+                  <strong>Revolution&rsquo;s Broken Sword</strong> &mdash; all three Releases of
+                  Broken Sword: The Shadow of the Templars, the demo, the CD game and the
+                  PlayStation conversion. It runs the game&rsquo;s scripts, walks George, draws its
+                  rooms and speaks its lines; it skips the cutscenes, and it says so rather than
+                  stopping.
+                </li>
+                <li>
+                  <strong>Revolution&rsquo;s Broken Sword II</strong> &mdash; all three Releases of
+                  The Smoking Mirror. A separate engine from the first game rather than a later
+                  version of it: they share no bytecode and no file format. It runs, draws and
+                  edits; its walk-finding is separate work from the first game&rsquo;s, so nobody
+                  walks yet and the status line leads with that.
+                </li>
+              </ul>
+            </details>
+            <p class="muted">
+              Loose files, a whole folder or a single <code>.zip</code> all work. Anything else is
+              named and refused rather than half-run.
+            </p>
+            <p class="muted">
+              Nothing is uploaded. The files are read in your browser and stay on your machine.
+            </p>
+            <!--
+              2.5.7, Dragging Movements. Dropping files here is a drag, so the
+              same job has to be doable without one — the two buttons in the
+              title bar are that route, and saying so is the difference between
+              an alternative that exists and one anybody finds.
+            -->
+            <p class="muted">
+              Dragging is never required: “Open game folder…” and “Open files…” in the bar above do
+              the same thing with a single click or the Enter key.
+            </p>
+
+            <!--
+              Filled in from the dev server's `games/` folder when there is one.
+              Hidden in a static build, where there is no server to list a
+              directory and the picker above is the only route.
+            -->
+            <div id="games-folder" class="games-folder" hidden>
+              <h3 id="games-folder-heading">In your <code>games</code> folder</h3>
+              <ul
+                id="games-folder-list"
+                class="games-folder-list"
+                aria-labelledby="games-folder-heading"
+              ></ul>
+              <p id="games-folder-note" class="muted"></p>
+            </div>
+          </div>
+        </section>
+
+        <section id="stage" class="stage" hidden aria-label="Game screen">
+          <!--
+            The picture the game draws, and the only part of this application
+            whose *content* cannot be given a text alternative: it is a running
+            third-party game, redrawn sixty times a second. What can be given —
+            and is — is a name, a description of how to operate it, and a status
+            line elsewhere on the page that says which game and which room.
+
+            `tabindex="0"` because the canvas is operable: it takes clicks, and
+            focus has to be able to reach it by keyboard. Keys are listened for
+            on the window, so a game responds whether or not the canvas holds
+            focus.
+          -->
+          <canvas
+            id="screen"
+            width="320"
+            height="200"
+            tabindex="0"
+            role="application"
+            aria-label="Game screen"
+            aria-describedby="screen-help"
+          >
+            The game is drawn on a canvas, which this browser does not support.
+          </canvas>
+          <p id="screen-help" class="visually-hidden">
+            The running game draws here. Use the arrow keys, Enter and Escape as the game itself
+            asks; typed text goes to the game. The status line at the bottom of the page names the
+            game and the room you are in.
+          </p>
+        </section>
+      </main>
+
+      <!--
+        The status line and the load bar.
+        A region rather than a second `<footer>`: the credit bar below is the
+        page's `contentinfo`, and two of those on one page names neither.
+      -->
+      <div class="statusbar" role="region" aria-label="Status">
+        <span id="status">No game loaded.</span>
+        <div
+          id="progress"
+          class="progress"
+          role="progressbar"
+          aria-label="Loading progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          hidden
+        >
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <!--
+          Rewritten once a second. Not announced: a frame counter read aloud
+          every second would bury every message that matters.
+        -->
+        <span id="fps" class="muted" aria-hidden="true"></span>
+      </div>
+
+      <details id="log-panel" class="log-panel">
+        <summary>Engine log</summary>
+        <!--
+          `tabindex="0"` because it scrolls: a scrollable region that cannot be
+          reached by keyboard cannot be scrolled by one. `role="log"` rather
+          than a live region — an engine log is appended to constantly, and
+          reading every line aloud is not what anyone opening it wants.
+        -->
+        <pre id="log" tabindex="0" role="log" aria-label="Engine log"></pre>
+      </details>
+
+      <!--
+        The credit row: who made this, which version, and the storage notice.
+        Its own row, last in the document and pinned to the bottom of the
+        window — the status bar above it is a sentence of unbounded length
+        about the running game, and these three do not belong in a race with
+        it for the same space. Filled in by `main.ts`.
+      -->
+      <footer id="creditbar" class="creditbar"></footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,188 @@
+/*
+ * The save and load menus.
+ *
+ * The game details dialog's shell holds this — same overlay, same panel, same
+ * header — so what is here is only the board inside: ten rows that have to be
+ * scannable at a glance, because picking the right one is the entire job.
+ *
+ * Rows rather than a grid of tiles. A save is identified by its name and its
+ * date, both of which are sentences, and a grid gives a sentence a column two
+ * words wide.
+ */
+
+/* Narrower than a README: ten short rows, not a document. */
+.save-panel {
+  width: min(34rem, 100%);
+}
+
+.save-body {
+  padding: 0.85rem 1rem;
+}
+
+.save-slots,
+.save-games {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.save-slot-row,
+.save-game-row {
+  margin: 0;
+}
+
+.save-slot,
+.save-game {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  background: #12121a;
+}
+
+.save-slot:hover:not(:disabled),
+.save-game:hover,
+.save-slot:focus-visible,
+.save-game:focus-visible {
+  border-color: var(--accent);
+  background: #1c1c24;
+}
+
+/*
+ * A disabled slot in the Load menu is an empty one. Dimmed rather than removed,
+ * so the board keeps its shape and slot 7 sits in the same place in both menus
+ * — but still legible, because "empty" is information and greying it into the
+ * background makes the row look broken instead of free.
+ */
+.save-slot:disabled {
+  color: var(--muted);
+  background: #101018;
+  opacity: 1;
+  cursor: default;
+}
+
+/* The slot number, in a fixed column so ten names start at the same x. */
+.save-slot-number {
+  flex: none;
+  width: 1.4rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.save-slot-text {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.save-slot-name,
+.save-game-title {
+  color: var(--text);
+  /* A name the player typed can be any length; the row must not grow for it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-slot-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.save-slot-detail,
+.save-game-detail {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.save-game {
+  display: grid;
+  gap: 0.15rem;
+}
+
+/* ------------------------------------------------------- naming a slot -- */
+
+/*
+ * The name box, in the row it names.
+ *
+ * It replaces the button rather than sitting under it, so the board does not
+ * jump by a row's height the moment you pick one — the nine slots below stay
+ * exactly where the eye left them.
+ */
+.save-slot-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: #1c1c24;
+}
+
+.save-slot-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.save-slot-input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  color: var(--text);
+  font: inherit;
+  background: #101018;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.save-slot-input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.save-slot-confirm {
+  flex: none;
+  font-weight: 600;
+  color: #1a1a20;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.save-slot-confirm:hover,
+.save-slot-confirm:focus-visible {
+  filter: brightness(1.08);
+}
+
+.save-slot-cancel {
+  flex: none;
+}
+
+/* ------------------------------------------------------------- the foot -- */
+
+/*
+ * Where the saves live, and the way back.
+ *
+ * The note takes the width and the button sits at the end, so the footer reads
+ * as a sentence with an action after it rather than two competing controls.
+ */
+.save-footer {
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.save-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.save-back {
+  flex: none;
+}

@@ -1,0 +1,287 @@
+/*
+ * The storage notice and its policy dialog.
+ *
+ * Shared by the player and the editor, both of which store things in the
+ * browser, so it lives in `ui/` and is imported by each page's stylesheet
+ * rather than being written twice.
+ */
+
+.consent-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  gap: 0.9rem;
+  width: min(46rem, calc(100vw - 2rem));
+  padding: 1rem 1.1rem;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+
+.consent-banner[hidden] {
+  display: none;
+}
+
+/* Slides down and out, so dismissing it reads as an action rather than a jump. */
+.consent-banner.is-hiding {
+  opacity: 0;
+  transform: translateX(-50%) translateY(16px);
+  pointer-events: none;
+}
+
+.consent-mark {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--accent);
+  background: #22222b;
+  border-radius: 9px;
+}
+
+.consent-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.consent-text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.consent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+/* A button that reads as a link: inline in a sentence, but activates a dialog. */
+.consent-inline {
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.consent-inline:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--text);
+}
+
+.consent-accept {
+  border-color: var(--accent);
+}
+
+/* The persistent way back to the policy, once the banner has been dismissed. */
+.consent-link {
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.consent-link:hover:not(:disabled) {
+  color: var(--text);
+  border-color: transparent;
+}
+
+.consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 65%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.consent-overlay[hidden] {
+  display: none;
+}
+
+.consent-overlay.is-open {
+  opacity: 1;
+}
+
+.consent-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(42rem, 100%);
+  max-height: min(80vh, 44rem);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transform: translateY(12px);
+  transition: transform 0.2s ease;
+}
+
+.consent-overlay.is-open .consent-dialog {
+  transform: none;
+}
+
+.consent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.consent-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.consent-close {
+  display: grid;
+  place-items: center;
+  padding: 0.3rem;
+  color: var(--muted);
+  line-height: 0;
+}
+
+.consent-close:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.consent-scroll {
+  padding: 1.1rem;
+  overflow-y: auto;
+}
+
+.consent-scroll h3 {
+  margin: 1.3rem 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.consent-scroll h3:first-of-type {
+  margin-top: 0;
+}
+
+.consent-scroll p {
+  margin: 0 0 0.7rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.consent-scroll a {
+  color: var(--accent);
+}
+
+.consent-updated {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.consent-table-scroll {
+  overflow-x: auto;
+}
+
+.consent-table {
+  width: 100%;
+  margin: 0.3rem 0 0.8rem;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.consent-table caption {
+  margin-bottom: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: left;
+}
+
+.consent-table th,
+.consent-table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.consent-table th {
+  font-size: 0.76rem;
+  color: var(--text);
+}
+
+.consent-table td {
+  color: var(--muted);
+}
+
+.consent-table code {
+  padding: 0.1rem 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  color: var(--text);
+  background: #22222b;
+  border-radius: 5px;
+}
+
+@media (max-width: 640px) {
+  .consent-banner {
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .consent-actions button {
+    flex: 1;
+  }
+}
+
+/* Movement is decoration here; the notice must still appear and dismiss. */
+@media (prefers-reduced-motion: reduce) {
+  .consent-banner,
+  .consent-overlay,
+  .consent-dialog {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------- accessibility statement */
+
+/*
+ * The accessibility statement borrows this dialog's shell — same overlay, same
+ * panel, same cross — because it is the same kind of thing: a claim the project
+ * makes about itself, held over the page for a reader to check. Only its list
+ * needs anything of its own.
+ */
+.a11y-list {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.a11y-list li {
+  margin-bottom: 0.5rem;
+}
+
+.a11y-list strong {
+  color: var(--text);
+}

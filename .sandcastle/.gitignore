@@ -1,0 +1,7 @@
+.env
+logs/
+worktrees/
+scumm-version-matrix.md
+agi-sci-version-matrix.md
+shots/
+reports/

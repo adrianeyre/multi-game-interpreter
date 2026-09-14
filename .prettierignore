@@ -1,0 +1,5 @@
+dist
+dist-web
+coverage
+public/games
+CHANGELOG.md

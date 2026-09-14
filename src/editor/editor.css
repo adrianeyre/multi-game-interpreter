@@ -1,0 +1,2964 @@
+@import '../ui/a11y.css';
+@import '../ui/busy.css';
+@import '../ui/consent.css';
+
+:root {
+  color-scheme: dark;
+  --bg: #101014;
+  --panel: #17171d;
+  --panel-2: #1d1d25;
+  --border: #2a2a33;
+  --text: #e6e6ea;
+  --muted: #8b8b96;
+  --accent: #d8a657;
+  --good: #6bffb0;
+  --warn: #e0a355;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: 13px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  /* A column, so anything added above the editor — the import banner — takes
+     its own space instead of pushing the editor's bottom off the screen. */
+  display: flex;
+  flex-direction: column;
+}
+
+#editor {
+  display: flex;
+  flex-direction: column;
+  /* Whatever is left after the banner, rather than a fixed screen height. */
+  flex: 1;
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.project-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.3rem 0.5rem;
+  min-width: 14rem;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/*
+ * 1.4.11, Non-text Contrast. `--border` is 1.3:1 against the panels here, which
+ * is right for a rule between two blocks and not enough to be the visible
+ * boundary of something you are meant to press or type into.
+ */
+button,
+select,
+input,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--control-edge);
+  border-radius: 6px;
+  padding: 0.3rem 0.55rem;
+}
+
+button {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+/*
+ * 0.55 rather than 0.4. A disabled control is exempt from the contrast rules,
+ * but "unavailable" is still a thing the reader has to be able to read, and at
+ * 0.4 on this panel the label was nearer invisible than greyed.
+ */
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1206;
+  font-weight: 600;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+/* --------------------------------------------------------------- workspace */
+
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 200px 1fr 320px;
+  min-height: 0;
+}
+
+.sidebar,
+.inspector {
+  padding: 0.75rem;
+  /* Room to scroll past the last control. Without it the bottom button sits
+     flush against the edge and reads as cut off. */
+  padding-bottom: 3rem;
+  overflow-y: auto;
+  background: var(--panel);
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+}
+
+.inspector {
+  border-left: 1px solid var(--border);
+}
+
+.centre {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h3:first-child {
+  margin-top: 0;
+}
+
+h5 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+/*
+ * A row is a button inside a list item.
+ *
+ * It used to be the `<li>` itself with a click handler — no role, no tab stop,
+ * no way to pick a room without a pointer. The button is the part you press and
+ * the item is the part the list is made of, and neither has to pretend to be
+ * the other.
+ */
+.list li {
+  border-radius: 5px;
+}
+
+.list-button {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.list-button:hover {
+  background: var(--panel-2);
+  border-color: transparent;
+}
+
+/*
+ * The open row.
+ *
+ * 1.4.1: the accent colour used to be the only mark, so "which room am I in"
+ * was a question only a colour answered. The bar down the left says it as a
+ * shape as well, and `aria-current` says it to a screen reader.
+ */
+.list li.selected > .list-button,
+.list-button[aria-current='true'] {
+  background: #2c2c38;
+  color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------- accordion */
+
+.accordion + .accordion {
+  margin-top: 0.35rem;
+}
+
+/*
+ * The heading a section's button sits inside.
+ *
+ * It exists for the document outline, not for the look — a screen reader user
+ * navigates a page like this by heading, and the sidebar had none. Everything
+ * visible about the row is still the button's.
+ */
+.accordion-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.accordion-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.accordion-head:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.accordion-head .chevron {
+  width: 0.8em;
+  font-size: 0.9em;
+}
+
+.accordion-title {
+  flex: 1;
+}
+
+.accordion-count {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--panel-2);
+  font-size: 0.9em;
+  letter-spacing: 0;
+}
+
+.accordion-body {
+  padding: 0.35rem 0.1rem 0.5rem;
+}
+
+/* ------------------------------------------------------------------- audio */
+
+.audio-list li.audio-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: default;
+}
+
+/*
+ * 2.5.8 asks 24x24 of any target; these were 20 tall and about 22 wide.
+ */
+.audio-play,
+.audio-save,
+.audio-rename,
+.audio-replace,
+.audio-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--control-edge);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.audio-play:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/*
+ * Shown on hover — and on focus, which is the half that was missing.
+ *
+ * `visibility: hidden` takes an element out of the tab order entirely, so these
+ * two buttons could not be reached by keyboard at all: there was no hover to
+ * produce and therefore no way to make them appear. `:focus-within` is what
+ * makes them appear when a keyboard arrives at the row instead (2.1.1), and
+ * `opacity` rather than `visibility` keeps them focusable on the way in.
+ */
+.audio-rename,
+.audio-replace,
+.audio-remove {
+  opacity: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  transition: opacity 100ms ease;
+}
+
+.audio-item:hover .audio-rename,
+.audio-item:hover .audio-replace,
+.audio-item:hover .audio-remove,
+.audio-item:focus-within .audio-rename,
+.audio-item:focus-within .audio-replace,
+.audio-item:focus-within .audio-remove,
+.audio-rename:focus-visible,
+.audio-replace:focus-visible,
+.audio-remove:focus-visible {
+  opacity: 1;
+  border-color: var(--control-edge);
+}
+
+.audio-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.audio-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audio-meta {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+
+.audio-reason {
+  color: var(--warn);
+  font-size: 0.8em;
+  line-height: 1.35;
+  /* Wraps rather than being clipped: a reason that cannot be read whole is
+     not a reason. */
+  white-space: normal;
+}
+
+.audio-item.audio-silent .audio-name {
+  color: var(--muted);
+}
+
+/*
+ * Save stays visible.
+ *
+ * Rename and remove fade in on hover because an author knows they are there.
+ * This one was reported missing, and a control that only appears once the
+ * pointer is already on the row is how it went missing.
+ */
+.audio-save {
+  color: var(--text);
+}
+
+.audio-filter,
+.audio-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+
+.audio-filter input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--target-min);
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--control-edge);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.audio-pager {
+  justify-content: space-between;
+}
+
+.audio-pager button {
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--control-edge);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.audio-pager button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ canvas */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/*
+ * The armed tool.
+ *
+ * The accent fill is the obvious mark and it is not the only one: 1.4.1 asks
+ * that colour not be the sole channel, and the underline survives a forced
+ * palette, a greyscale screen and a colour-blind reader.
+ */
+.tool.selected,
+.tool[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1206;
+  box-shadow: inset 0 -3px 0 #1a1206;
+}
+
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/*
+ * 2.5.8, Target Size (Minimum): 24 by 24.
+ *
+ * These were 18 square with a 2px gap, which fails both the size and the
+ * spacing exception. They are 24 now, and the palette that holds 256 of them
+ * scrolls rather than growing the page — a row of colours is a row of controls
+ * before it is a picture, and it has to be pressable.
+ */
+.swatch {
+  width: var(--target-min);
+  height: var(--target-min);
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: 0;
+  border-radius: 3px;
+  /* 1.4.11: the edge of a swatch is what separates two adjacent colours, so it
+     has to be visible against both — a black hairline is not, against black. */
+  border: 1px solid var(--control-edge);
+}
+
+/*
+ * The chosen colour.
+ *
+ * A ring in two tones rather than one accent outline: an accent ring around an
+ * accent-coloured swatch is invisible, and the selected colour is exactly the
+ * one a person is most likely to have picked because they wanted that colour.
+ */
+.swatch.selected,
+.swatch[aria-checked='true'] {
+  outline: 2px solid #ffffff;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px #08080b;
+  position: relative;
+  z-index: 1;
+}
+
+/*
+ * The column the open image lives in.
+ *
+ * `min-height` is the load-bearing line. `flex: 1` alone means "take what is
+ * left", and what was left of the AGOS art tab was nothing: the thumbnail strip
+ * below it does not shrink, and a Simon 1 zone of 1,092 images wrapped to some
+ * four thousand pixels of it. The image an author had opened was squeezed into
+ * a sliver. The thumbnails have moved to the right column, and this floor makes
+ * sure no future neighbour can do the same thing again.
+ */
+.canvas-wrap {
+  flex: 1;
+  min-height: 12rem;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 1rem;
+  background: #08080b;
+}
+
+.room-canvas {
+  image-rendering: pixelated;
+  background: #000;
+  border: 1px solid var(--border);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* ------------------------------------------------------------------ fields */
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.field > span {
+  flex: 0 0 5.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.field input,
+.field select,
+.field textarea {
+  flex: 1;
+  min-width: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ----------------------------------------------------------------- actions */
+
+.action-editor {
+  margin: 0.4rem 0 0.8rem;
+}
+
+.action-row {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.action-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.action-title {
+  flex: 1;
+  font-size: 0.82rem;
+}
+
+.action-controls {
+  display: flex;
+  gap: 0.15rem;
+}
+
+/*
+ * 2.5.8: these were about 18 by 20, in a column of three with no spacing to
+ * spare, which is the exact shape the size rule was written for.
+ */
+.icon-button {
+  display: grid;
+  place-items: center;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85rem;
+  background: transparent;
+  border-color: transparent;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--control-edge);
+}
+
+.action-fields {
+  margin-top: 0.4rem;
+}
+
+.action-fields:empty {
+  margin-top: 0;
+}
+
+.action-branch {
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--border);
+}
+
+.action-add select {
+  width: 100%;
+}
+
+.empty {
+  margin: 0.3rem 0;
+}
+
+/* -------------------------------------------------------------- status bar */
+
+.statusbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.statusbar .status-end {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A script the editor kept but cannot offer to edit: shown as what it is. */
+.raw-listing {
+  max-height: 16rem;
+  margin: 0.25rem 0 0;
+  padding: 0.5rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* ------------------------------------------------------------------ credit */
+
+/*
+ * A second bar under the status bar, holding the credit and the storage
+ * notice. Sharing a row with the status text did not work: that text is a
+ * sentence about the project — autosave state, counts, a compile error — and
+ * at any real length it fills the row on its own. Nothing here competes for the
+ * row now, so a narrow screen wraps the bar rather than dropping the credit.
+ */
+.creditbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 1rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.credit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.credit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.credit-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.credit-mark {
+  flex: none;
+}
+
+.credit-separator {
+  color: var(--border);
+}
+
+.credit-version {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------- play */
+
+.play-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 10;
+}
+
+.play-overlay[hidden] {
+  display: none;
+}
+
+.play-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+}
+
+.play-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.play-panel h2 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/*
+ * 1.4.10: a fixed 640px picture inside a fixed-width panel scrolled the page
+ * sideways on anything narrower than a laptop, and at 400% zoom on any screen.
+ * The aspect ratio holds it in shape while the width gives way.
+ */
+.play-canvas {
+  image-rendering: pixelated;
+  width: 640px;
+  max-width: 100%;
+  aspect-ratio: 8 / 5;
+  height: auto;
+  background: #000;
+  display: block;
+  cursor: crosshair;
+}
+
+.play-panel {
+  max-width: min(100vw - 2rem, 42rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.play-status,
+.play-log {
+  max-width: 100%;
+}
+
+.play-status {
+  margin: 0.5rem 0 0;
+  max-width: 640px;
+}
+
+/* A game that did not start is not a muted aside. */
+.play-status.play-problem {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/*
+ * The engine log.
+ *
+ * Always present rather than behind a disclosure: the messages that matter here
+ * are written during boot, and a panel nobody opened is a panel that swallowed
+ * them.
+ */
+.play-log {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem;
+  max-width: 640px;
+  max-height: 9rem;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.play-log:empty {
+  display: none;
+}
+
+/* ------------------------------------------------------------------- tabs */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tab {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-bottom: -1px;
+}
+
+.tab.selected,
+.tab[aria-selected='true'] {
+  background: var(--panel);
+  border-color: var(--control-edge);
+  border-bottom-color: var(--panel);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ----------------------------------------------------------------- sprite */
+
+.sprite-canvas {
+  image-rendering: pixelated;
+  cursor: crosshair;
+  touch-action: none;
+  border: 1px solid var(--border);
+}
+
+.swatch.transparent {
+  background:
+    linear-gradient(45deg, #33333d 25%, transparent 25%),
+    linear-gradient(-45deg, #33333d 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #33333d 75%),
+    linear-gradient(-45deg, transparent 75%, #33333d 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+}
+
+/* --------------------------------------------------------------- list rows */
+
+.list li.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.list li.row > span {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+}
+
+/* ------------------------------------------------------------- frame strip */
+
+.frame-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.strip-label {
+  flex: 0 0 auto;
+  margin-right: 0.25rem;
+}
+
+.cel {
+  position: relative;
+  padding: 2px;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  background: #14141a;
+}
+
+.cel.selected,
+.cel[aria-checked='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cel img {
+  image-rendering: pixelated;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.cel-hold {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 0.6rem;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.strip-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.strip-controls .field {
+  margin-bottom: 0;
+}
+
+.strip-controls .field > span {
+  flex: 0 0 auto;
+}
+
+.strip-controls .field input {
+  width: 4rem;
+}
+
+.strip-label {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.strip-warning {
+  color: var(--accent);
+  font-size: 0.78rem;
+  cursor: help;
+}
+
+/* --------------------------------------------------- sprite colour picking */
+
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: 100%;
+}
+
+.palette-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+/*
+ * The full 256-colour table.
+ *
+ * Sixteen columns of full-size swatches rather than thirty-two of 14px ones:
+ * 2.5.8 applies here exactly as it does to the strip above, and a grid that
+ * fits the panel by making every target too small to hit is not a grid anyone
+ * was served by. It scrolls in its own box instead.
+ */
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--target-min), 1fr));
+  gap: 2px;
+  margin-top: 0.5rem;
+  padding: 0.4rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  background: #0d0d11;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.coords {
+  margin-left: auto;
+  margin-right: 1rem;
+  min-width: 5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------- import banner */
+
+.import-banner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--accent, #d8a657);
+  color: #17171d;
+  font-size: 0.85rem;
+}
+
+.import-banner p {
+  margin: 0;
+  flex: 1;
+}
+
+.import-banner button {
+  flex: none;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid #17171d;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* A v6 script, one row per instruction, with its operand editable. */
+.instruction-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.instruction-row {
+  display: grid;
+  /*
+   * `minmax(0, 1fr)` rather than `1fr`, so the text column may be narrower than
+   * its content when the row genuinely has no room. A bare `1fr` is
+   * `minmax(auto, 1fr)`, and that `auto` floor is the column's *min-content*
+   * width — which is the size a long instruction refuses to go below, pushing
+   * the row wider than the inspector instead.
+   */
+  grid-template-columns: 3.5em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.instruction-offset {
+  text-align: right;
+  opacity: 0.55;
+}
+
+/*
+ * An instruction wraps rather than stretching the inspector, and wraps at its
+ * spaces.
+ *
+ * `break-word`, not `anywhere`. The two wrap the same way once a width is
+ * settled, and they *size* the box differently: `anywhere` counts as a break
+ * opportunity when the browser works out min-content, so the column's
+ * min-content width becomes a single character. In a grid track that reads that
+ * floor, the column then happily collapses to one character wide to give the
+ * others room — and every instruction in a room's script is drawn one letter
+ * per line, straight down the panel. `break-word` leaves min-content at the
+ * longest word, which is what a monospace listing wants anyway.
+ */
+.instruction-text {
+  overflow-wrap: break-word;
+}
+
+/*
+ * How far an edit to a line of dialogue reaches.
+ *
+ * One string can be referenced from many scripts, so changing it changes every
+ * place it appears — a property neither Preserved bytes nor an Action has. The
+ * warning sits on the instruction row rather than in a string editor, because
+ * the author decides to change a line while looking at the script.
+ */
+.instruction-reach {
+  font-size: 0.85em;
+  opacity: 0.7;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------- the AGI surface */
+
+/*
+ * An AGI project's editing surface replaces the SCUMM one wholesale rather
+ * than sharing it: an AGI project has no actors, no verbs and no walk boxes,
+ * so there is nothing for the room canvas or the sprite strip to show (#134).
+ */
+.agi-editor {
+  display: grid;
+  grid-template-columns: 16rem 1fr;
+  gap: 1rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.agi-resource-list,
+.agi-resource-detail {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.agi-resource-list h3 {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+.agi-section-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.agi-resource {
+  min-width: 2.25rem;
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agi-resource.selected {
+  outline: 2px solid currentColor;
+}
+
+/*
+ * An Unrecovered resource is marked in the list as well as in its own panel,
+ * because ADR 0013 makes the count a published number with a target of zero —
+ * and a number nobody can see at a glance is not one anybody drives down.
+ */
+.agi-resource.agi-unrecovered {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.agi-summary,
+.agi-provenance,
+.agi-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.agi-summary-warning {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.agi-unrecovered-note {
+  border: 1px dashed currentColor;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.agi-logic-source {
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.agi-message-row,
+.agi-statement,
+.agi-command,
+.agi-loop-row,
+.agi-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+.agi-controls {
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
+}
+
+.agi-message-row input {
+  flex: 1;
+}
+
+.agi-statement-name,
+.agi-command-name {
+  min-width: 10rem;
+  font-family: ui-monospace, monospace;
+  text-align: left;
+}
+
+.agi-operand {
+  width: 4.5rem;
+}
+
+.agi-command.selected {
+  outline: 1px solid currentColor;
+}
+
+/* A Picture is 160 wide and doubled, so it is shown at its real proportions. */
+.agi-picture-canvas {
+  display: block;
+  width: 640px;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  margin: 0.5rem 0;
+}
+
+.agi-palette {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.agi-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid rgb(0 0 0 / 0.4);
+  cursor: pointer;
+}
+
+.agi-swatch.selected {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.agi-cel-grid {
+  display: grid;
+  gap: 0;
+  width: max-content;
+  border: 1px solid rgb(0 0 0 / 0.4);
+}
+
+/*
+ * One cell is one pixel of the artwork.
+ *
+ * This is 2.5.8's "essential" exception, and it is worth naming rather than
+ * leaving as an oversight: a cel is up to 160 pixels wide, and a grid whose
+ * cells were 24 square would be four thousand pixels across — the artwork would
+ * no longer be legible *as* artwork, which is the thing being edited. The
+ * accessible route is the keyboard grid: one tab stop, arrows to move, and each
+ * cell named by its row, its column and its colour.
+ */
+.agi-pixel {
+  width: 12px;
+  height: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  cursor: crosshair;
+}
+
+.agi-swatch {
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+}
+
+/* The transparent colour is shown as such, so a cel's holes are visible. */
+.agi-pixel.agi-pixel-transparent {
+  background-image: linear-gradient(45deg, rgb(0 0 0 / 0.25) 25%, transparent 25%);
+  background-size: 6px 6px;
+}
+
+/* -------------------------------------------------------------- reflow --- */
+
+/*
+ * 1.4.10, Reflow: content has to work in a 320 CSS pixel column with no
+ * two-directional scrolling — which is the same requirement as 400% zoom on a
+ * 1280px screen, and is where a three-column editor with two fixed side panels
+ * fell over completely. `body` also had `overflow: hidden` on a fixed
+ * `100vh`, so what did not fit was not merely awkward: it was unreachable.
+ *
+ * Below 60rem the three columns become one, and the page scrolls.
+ */
+@media (max-width: 60rem) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  #editor {
+    min-height: 100vh;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar,
+  .inspector {
+    /* Their own scrollers made sense as columns and do not as stacked blocks:
+       a panel that scrolls inside a page that scrolls is two scrollbars for one
+       list. */
+    overflow: visible;
+    max-height: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .agi-editor {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .agi-resource-list,
+  .agi-resource-detail {
+    overflow: visible;
+  }
+}
+
+/*
+ * 1.4.4, Resize Text: the root is 13px here, so 200% is 26px and the layout has
+ * to hold. It does, because every size below the root is relative to it — the
+ * one thing that must not creep back in is a `px` font size on a component.
+ */
+
+/*
+ * 1.4.12, Text Spacing. Nothing here sets a fixed height on a box that holds
+ * text; the two places that clip — the status line's ellipsis and the audio
+ * track name — are single-line by design and say the same thing in `title` and
+ * in their accessible name.
+ */
+
+/* ------------------------------------------------------------- SCI editor -- */
+
+/*
+ * The same two-column shape as the AGI surface, and separate rules rather than
+ * a shared `.family-editor` class. The two surfaces have no editing operation
+ * in common and sharing their styling is the first step towards sharing a
+ * panel, which is the thing ADR 0011 keeps out of the shell and #134 keeps out
+ * of the editor.
+ */
+.sci-editor {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 1rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sci-resource-list,
+.sci-resource-detail {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.sci-resource-list h3 {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+/* One entry per row. These are a *list* of records, not a row of controls:
+   King's Quest VII's Views section is 1,527 of them, and wrapped they read as
+   a wall of chips with no left edge to scan down. */
+.sci-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.sci-resource,
+.sci-object,
+.sci-method,
+.sci-toggle,
+.sci-apply {
+  padding: 0.2rem 0.45rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A row in the left column is a list entry rather than a button, so it loses
+   the border and the raised background a `<button>` gets by default.
+
+   It stays a `<button>`, which is the part that matters and is not visual:
+   `docs/editor-parity.md` row 32 asks that every list be reachable from the
+   keyboard, and a `<div>` with a click handler is not. What changes is only
+   how it looks. */
+.sci-resource-list .sci-resource {
+  display: block;
+  inline-size: 100%;
+  text-align: start;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  /* Long names — a cast member, a room — are elided rather than wrapped, so
+     every row is one line high and the column scans. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sci-resource-list .sci-resource:hover {
+  background: rgb(127 127 127 / 18%);
+}
+
+/* Selection is a filled row rather than an outline, because an outline on a
+   borderless row reads as the button that was just removed. */
+.sci-resource-list .sci-resource.selected {
+  outline: 0;
+  background: rgb(127 127 127 / 32%);
+  font-weight: 600;
+}
+
+/* The focus ring stays, and is the one border a keyboard user needs. */
+.sci-resource-list .sci-resource:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+.sci-resource.selected,
+.sci-object.selected,
+.sci-method.selected {
+  outline: 2px solid currentColor;
+}
+
+.sci-resource.sci-unrecovered {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.sci-summary,
+.sci-provenance,
+.sci-text-surface,
+.sci-languages,
+.sci-carried,
+.sci-degraded-count,
+.sci-message-faces,
+.sci-note,
+.sci-placeholder {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.sci-summary-warning {
+  opacity: 1;
+  font-weight: 600;
+}
+
+/*
+ * The bar naming the re-supplied game folder, above the resources.
+ *
+ * Bordered rather than a paragraph and a button for the same reason the Sword
+ * surfaces' is: it states what is open, and a claim about state that looks like
+ * body text is one an author reads past and then wonders why Play refused.
+ */
+.sci-folder-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+.sci-folder-title {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.sci-folder-bar p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.sci-folder-name {
+  font-weight: 600;
+  opacity: 1;
+}
+
+/*
+ * "Export PNG", wherever artwork is open.
+ *
+ * Deliberately quiet: it sits beside the fields that edit the resource, and a
+ * prominent button next to an editing surface reads as the primary action when
+ * it is the one that leaves.
+ */
+.sci-export {
+  align-self: flex-start;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+/*
+ * The refusal is a panel rather than a line, because it replaces the editor
+ * instead of annotating it: a game identified only to a bucket is not edited at
+ * all (ADR 0013), and the reason has to be readable rather than glanced at.
+ */
+.sci-refusal {
+  border: 1px dashed currentColor;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sci-class-graph,
+.sci-method-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.sci-source {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  white-space: pre;
+}
+
+.sci-problems {
+  min-height: 1.2rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+}
+
+.sci-cel-items {
+  border-collapse: collapse;
+  margin-bottom: 0.5rem;
+}
+
+.sci-cel-items th,
+.sci-cel-items td {
+  border: 1px solid currentColor;
+  padding: 0.2rem 0.4rem;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.sci-cel-field {
+  width: 5rem;
+  font: inherit;
+}
+
+/*
+ * The property and locals tables, which are the same table twice: a number, a
+ * name where the game gave one, and one 16-bit word. Tall on a big class — a
+ * SCI1.1 `Prop` has 56 properties — so they scroll inside the pane rather than
+ * pushing the method panel below the fold of a list nobody opened the script
+ * to read.
+ */
+.sci-properties,
+.sci-locals {
+  margin-bottom: 0.75rem;
+}
+
+.sci-property-table {
+  display: block;
+  max-height: 16rem;
+  overflow-y: auto;
+  border-collapse: collapse;
+}
+
+.sci-property-table th,
+.sci-property-table td {
+  border: 1px solid currentColor;
+  padding: 0.2rem 0.4rem;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.sci-property-note,
+.sci-locals-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.sci-message {
+  border-top: 1px solid currentColor;
+  padding: 0.5rem 0;
+}
+
+.sci-message-key {
+  margin: 0 0 0.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.sci-message-text {
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem;
+}
+
+.sci-command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.75rem;
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+.sci-command {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.sci-command-name {
+  min-width: 9rem;
+}
+
+.sci-operand {
+  flex: 1;
+  font: inherit;
+  padding: 0.1rem 0.3rem;
+}
+
+/*
+ * A pixel grid, shared by the font and cursor surfaces because they are the
+ * same operation — toggle a pixel — rather than two that happen to look alike.
+ * A button per pixel rather than a canvas: a canvas cannot be reached by a
+ * keyboard or named to a screen reader, and a 16x16 cursor is 256 of them.
+ */
+.sci-glyph-grid {
+  display: grid;
+  gap: 1px;
+  width: max-content;
+  max-width: 100%;
+  margin-bottom: 0.75rem;
+  border: 1px solid currentColor;
+  padding: 1px;
+}
+
+.sci-glyph-dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  outline-offset: -2px;
+}
+
+.sci-glyph-dot.inked {
+  background: currentColor;
+}
+
+.sci-glyph-dot.black {
+  background: rgb(0 0 0 / 60%);
+}
+
+/*
+ * The two Virtual Theatre surfaces.
+ *
+ * Written after a report that the editor "shows edit.html but does not render
+ * correctly": both families' panes had no CSS at all, so `sky-editor` and
+ * `lure-editor` laid out as bare block elements — a three-thousand-record list
+ * running the full width of the page with the detail pane below it, off screen.
+ * The markup was right and nothing said so.
+ *
+ * The shape follows `.sci-editor` deliberately rather than inventing a third
+ * layout: a fixed list column and a scrolling detail pane, because that is what
+ * every family surface here is, and a person moving between them should not
+ * have to relearn where things are.
+ *
+ * Selection is `aria-pressed` rather than a class. These editors set the
+ * attribute because it is what a screen reader needs, and styling the same
+ * thing the assistive technology reads keeps the two from disagreeing.
+ */
+.sky-editor,
+.lure-editor {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+  gap: 1rem;
+  /*
+   * `height: 100%` is what the SCI surface uses and it resolves against
+   * `.centre`. The flex pair is belt to that brace: `.centre` is a column flex
+   * container, so a surface mounted into it is a flex item, and `flex: 1` with
+   * `min-height: 0` makes it fill and scroll rather than depending on the
+   * percentage resolving.
+   */
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sky-resource-list,
+.sky-resource-detail,
+.lure-resource-list,
+.lure-resource-detail {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.sky-resource-list h3,
+.lure-resource-list h3 {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+.sky-section-body,
+.lure-section-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.sky-resource,
+.lure-resource {
+  padding: 0.2rem 0.45rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sky-resource[aria-pressed='true'],
+.lure-resource[aria-pressed='true'] {
+  outline: 2px solid currentColor;
+}
+
+.sky-summary,
+.sky-provenance,
+.sky-reach,
+.lure-summary,
+.lure-provenance,
+.lure-reach {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.sky-summary-warning,
+.lure-summary-warning {
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* A Compact's fields: a name and a number per row, aligned down the column. */
+.sky-field-grid {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 1fr;
+  gap: 0.2rem 0.75rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+
+/*
+ * The bytecode listing.
+ *
+ * Monospaced and scrolling in its own box, because it is a listing of up to a
+ * few hundred instructions and the page must not grow to fit one. Read-only is
+ * said in the heading rather than implied by the styling (ADR 0025).
+ */
+.sky-disassembly {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sky-listing {
+  margin: 0;
+  padding: 0.5rem;
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid currentColor;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+/* Lure's palettes: 220 chips, so they wrap rather than scroll sideways. */
+.lure-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+}
+
+.lure-swatch {
+  padding: 0;
+  border: 1px solid currentColor;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.lure-swatch-chip {
+  display: block;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/*
+ * The hotspot positions.
+ *
+ * A table because it is one: an id and two coordinates per row, and a person
+ * scanning for the hotspot they want reads down the id column. The inputs are
+ * narrow so a hundred and twenty-five rows stay compact.
+ */
+.lure-hotspots {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.lure-hotspots th,
+.lure-hotspots td {
+  padding: 0.15rem 0.5rem;
+  text-align: left;
+}
+
+.lure-hotspots input {
+  width: 5rem;
+  font: inherit;
+}
+
+/*
+ * The picture surfaces — the thing a SCUMM editor opens with, and what the run
+ * was pointed at. A read-only viewer (ADR 0025): a canvas with a palette picker
+ * above it. `image-rendering: pixelated` keeps a 320-wide picture crisp when it
+ * scales up rather than blurring the pixels the decoder just resolved. The
+ * canvas caps at the pane width so a picture never pushes the detail sideways.
+ */
+.sky-palette-picker,
+.lure-palette-picker {
+  display: block;
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.sky-palette-picker select,
+.lure-palette-picker select {
+  font: inherit;
+  margin-left: 0.35rem;
+}
+
+.sky-picture-canvas,
+.lure-picture-canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid currentColor;
+  image-rendering: pixelated;
+}
+
+/*
+ * The editor's own alert, confirm and prompt — `src/editor/dialog.ts`.
+ *
+ * These replace `window.alert`/`confirm`/`prompt`, which could not be styled
+ * at all: a dark editor threw up a white system box, and Chrome's "prevent
+ * this page from creating additional dialogs" silently swallowed every later
+ * question. So the styling is part of the fix rather than decoration.
+ *
+ * It borrows `.play-overlay`'s geometry deliberately — a fixed backdrop with
+ * the panel centred in a grid — because a second way of centring a modal is a
+ * second thing to keep in step.
+ */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.85);
+  /* Above the play overlay, which is 10: a question about a running game has
+   * to be answerable while it is on screen. */
+  z-index: 20;
+  padding: 1rem;
+}
+
+.dialog-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  /*
+   * 1.4.10 again, the lesson `.play-canvas` records: a fixed-width panel
+   * scrolls the page sideways on a narrow screen and at 400% zoom. `min()`
+   * gives way instead, and the message scrolls inside the panel rather than
+   * pushing the buttons off the bottom.
+   */
+  width: min(32rem, 100%);
+  max-height: min(80vh, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dialog-panel h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.dialog-message {
+  margin: 0;
+  overflow-y: auto;
+  /*
+   * The calls being replaced put `\n` between compiler errors, because that is
+   * all `window.alert` understood. `pre-wrap` keeps a list of errors as a list
+   * of lines while still wrapping a long sentence.
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dialog-message p {
+  margin: 0 0 0.5rem;
+}
+
+.dialog-message p:last-child {
+  margin-bottom: 0;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dialog-field input {
+  width: 100%;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dialog-primary {
+  border-color: var(--accent);
+}
+
+/*
+ * A sprite frame, checkered behind so transparency reads as transparency.
+ *
+ * Colour 0 in a Sky sprite is the transparent index, and the canvas honours it
+ * with alpha 0 — which against a dark panel is indistinguishable from a black
+ * pixel, and black is a colour these sprites actually use. The checkerboard is
+ * what makes the difference visible, and it is the same convention every image
+ * editor uses for the same reason.
+ */
+.sky-sprite-canvas {
+  image-rendering: pixelated;
+  max-width: 100%;
+  height: auto;
+  /* Doubled, because a sprite is small and a 1:1 actor is hard to judge. */
+  width: calc(var(--sprite-zoom, 2) * 100%);
+  max-height: 60vh;
+  object-fit: contain;
+  background-color: #2a2a2a;
+  background-image:
+    linear-gradient(45deg, #3a3a3a 25%, transparent 25%, transparent 75%, #3a3a3a 75%),
+    linear-gradient(45deg, #3a3a3a 25%, transparent 25%, transparent 75%, #3a3a3a 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    8px 8px;
+  border: 1px solid var(--border);
+}
+
+/* --------------------------------------------------------------------- AGOS */
+
+/*
+ * The AGOS surface fills all three panes, so this styles the middle one and
+ * the pieces that are its own. Its sidebar, tabs, tools, palette, canvas wrap
+ * and strip are the same elements the SCUMM surface uses and pick up the same
+ * rules above — which is the point of them being shared rather than copied.
+ */
+.agos-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.agos-centre {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+/*
+ * The two side panes, when this surface is mounted bare rather than into the
+ * shell — which is what a test does. In the app they are children of `.sidebar`
+ * and `.inspector` and take those rules instead.
+ */
+.agos-editor > .agos-sidebar,
+.agos-editor > .agos-inspector {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.agos-summary,
+.agos-provenance,
+.agos-paint-note,
+.agos-reach {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+/*
+ * A refusal, and why it is weight rather than colour.
+ *
+ * "Read-only", "Not writable" and "that value was refused" are the sentences an
+ * author has to notice, and 1.4.1 rules out carrying that on hue alone — the
+ * text already says it, so this only has to stop it reading as an aside.
+ */
+.agos-summary-warning {
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* The reach of a pooled-string edit, which is the one thing on this surface an
+   author must read before acting rather than after. */
+.agos-reach {
+  opacity: 1;
+  border-left: 3px solid var(--border);
+  padding-left: 0.5rem;
+}
+
+.agos-listing-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.agos-listing {
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.5rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+/* The item tree, the string table and a zone's contents are all this table. */
+.agos-art {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+}
+
+.agos-art th,
+.agos-art td {
+  text-align: left;
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.agos-art tr.selected {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+.agos-open-image {
+  font: inherit;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+}
+
+/*
+ * The image being drawn.
+ *
+ * `pixelated` because an AGOS sprite is a few dozen pixels across and is shown
+ * many times its own size; smoothing it is a different picture. The size is set
+ * from the zoom in script rather than here, so the two cannot disagree.
+ */
+.agos-image-canvas {
+  display: block;
+  image-rendering: pixelated;
+  margin: 0.5rem 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+/*
+ * A cel with no picture behind it.
+ *
+ * The strip's boxes are dark and meant to hold an image; before a game folder
+ * is offered there is nothing to put in one, so the size goes in instead. Left
+ * as an empty box it reads as a black square, which is how a whole strip of
+ * them read before there were thumbnails at all.
+ */
+.agos-cel-size {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+/*
+ * A room's backdrop.
+ *
+ * Its own box rather than the art canvas: a backdrop is eight-bit pixels
+ * against a palette its script loads, and it is a view rather than a drawing
+ * surface — `roomBackdrop.ts` says why a composed scene has nothing a paint
+ * could be written back to.
+ */
+.agos-room-wrap {
+  flex: 1;
+  min-height: 12rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  overflow: auto;
+  padding: 1rem;
+  background: #08080b;
+}
+
+/*
+ * The picture, as large as the column allows.
+ *
+ * Scaled to fit rather than to a multiplier: a room is 320 pixels across and a
+ * Simon 2 scrolling room is up to 960, so one zoom that suited both would suit
+ * neither. `pixelated` because enlarging pixel art with smoothing is a
+ * different picture.
+ */
+.agos-room-shot {
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+  border: 1px solid var(--border);
+}
+
+/* The note under it: the size and colours where a room drew, and which of the
+   four reasons it did not where it could not. */
+.agos-room-wrap p {
+  max-width: 44rem;
+  margin: 0;
+  text-align: center;
+}
+
+/* ---------------------------------------------------- the AGOS art column */
+
+/*
+ * Which game folder the art is coming out of.
+ *
+ * At the top of the properties column and set off from it, because it is the
+ * fact everything below depends on: an author who navigated to the wrong folder
+ * is reading a different game's art, and until this existed nothing said which
+ * folder had been accepted.
+ */
+.agos-folder-bar {
+  margin: 0 0 0.75rem;
+  padding: 0 0 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.agos-folder-title {
+  margin: 0 0 0.3rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* A folder's own name, which is all a browser will reveal of where it sits. */
+.agos-folder-name {
+  margin: 0 0 0.35rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A zone's images, one per row.
+ *
+ * Down the properties column rather than across the bottom of the canvas, so
+ * the list has somewhere to scroll and the centre column belongs to the picture
+ * — the measurement that moved it is in `renderStrip`.
+ */
+.agos-art-list {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.agos-art-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.agos-art-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.25rem;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/*
+ * The open image's row.
+ *
+ * Keyed off `aria-checked` as well as the class, the way the palette's chosen
+ * swatch is: the state is in the markup for a screen reader either way, so the
+ * stylesheet reads it from there rather than depending on a second signal.
+ */
+.agos-art-row.selected,
+.agos-art-row[aria-checked='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * The picture's box.
+ *
+ * A fixed size so the rows line up into a column a person can scan, and larger
+ * than the old 48-pixel cel because a row has the width to spare — the median
+ * AGOS image is about 32 by 18 pixels, so this shows most of them at better
+ * than actual size.
+ */
+.agos-art-thumb {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 48px;
+  background: #14141a;
+  border-radius: 2px;
+}
+
+.agos-art-thumb img {
+  image-rendering: pixelated;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.agos-art-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agos-art-name {
+  font-size: 0.85rem;
+}
+
+.agos-art-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Where in a zone's images the list is, and how to go somewhere else.
+ *
+ * Two rows rather than one: the steps, the count and a page field do not fit
+ * across a properties column at any width worth designing for, and a pager that
+ * wraps mid-control is worse than one that admits it needs the space.
+ */
+.agos-art-pager {
+  margin-top: 0.5rem;
+}
+
+.agos-art-turn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.agos-art-jump {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Wide enough for four digits, which covers a zone of any size these games
+   have — Simon 2's busiest runs to 39 pages. */
+.agos-art-page-input {
+  width: 4.5rem;
+  font: inherit;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.agos-art-of {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Which of the zone's images are on screen, in full — "1–48 of 1828" is the
+   fact a zone this size needs said, and "page 1 of 39" is not. */
+.agos-art-count {
+  flex: 1;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agos-operands {
+  padding: 0 0.25rem;
+}
+
+/*
+ * A line, which is the unit a verb-table guard points at — so it is the unit an
+ * author edits within, and instructions are grouped under one rather than
+ * listed flat.
+ */
+.agos-line {
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  margin: 0 0 0.5rem;
+}
+
+.agos-line h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.agos-instruction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+.agos-operand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+}
+
+.agos-operand input {
+  width: 7rem;
+}
+
+.agos-insert-instruction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.agos-insert-instruction input {
+  width: 5rem;
+}
+
+/*
+ * The one save control, directly under the folder bar.
+ *
+ * Both are about the column rather than about the selection, so they read as
+ * one block at the top of it; the border below separates the pair from the
+ * per-selection fields.
+ */
+.agos-save-bar {
+  margin: 0 0 0.75rem;
+  padding: 0 0 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.agos-save-bar p {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+/*
+ * The Broken Sword surfaces (ADR 0036).
+ *
+ * One set of rules for both families, unlike the documents themselves: the two
+ * projects share no record type, and a list-and-detail layout is not a record
+ * type. Where the Lure and Sky surfaces have their own prefixes because their
+ * layouts differ, these two have the same layout and differ only in content.
+ */
+.sword-editor {
+  display: grid;
+  grid-template-columns: minmax(14rem, 22rem) 1fr;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.sword-resource-list,
+.sword-resource-detail {
+  overflow: auto;
+  min-height: 0;
+  padding: 0.5rem;
+}
+
+.sword-resource-list {
+  border-right: 1px solid var(--border, #3a3a3a);
+}
+
+.sword-summary,
+.sword-provenance,
+.sword-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.sword-provenance,
+.sword-note {
+  opacity: 0.8;
+}
+
+.sword-summary-warning {
+  color: var(--warning, #e8b339);
+}
+
+/*
+ * The refusals under a screen: one object a drag will not move, per row.
+ *
+ * A list and not a paragraph, because it is a list — an author scanning for
+ * the name of the thing they just tried to drag should find it on its own
+ * line rather than inside a sentence.
+ */
+.sword-notes {
+  margin: 0 0 0.5rem;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+/*
+ * The folder bar above the Audio rows.
+ *
+ * A bordered block rather than a bare paragraph and a button, because it is
+ * making a claim about state — "this folder is open" — and a claim that looks
+ * like body text is one an author reads past.
+ */
+.sword-folder-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+.sword-folder-title {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.sword-folder-bar p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.sword-folder-name {
+  font-weight: 600;
+}
+
+.sword-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.5rem;
+}
+
+.sword-section-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.sword-section-buttons button:disabled {
+  /* The title carries the refusal, so a disabled button has to look reachable
+     enough that someone hovers it rather than reading it as broken. */
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sword-resource {
+  text-align: left;
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  background: none;
+  border: 1px solid transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sword-resource:hover,
+.sword-resource:focus-visible {
+  border-color: var(--border, #3a3a3a);
+}
+
+.sword-resource[aria-pressed='true'] {
+  background: var(--selected, #2f4f6f);
+}
+
+/*
+ * A screen is a picture, so the picture comes first and the numbers follow it.
+ * Scrolled rather than scaled down: Broken Sword's rooms are up to 784 pixels
+ * wide and shrinking one to fit loses the pixel an author is aiming at.
+ */
+.sword-screen-canvas {
+  max-width: 100%;
+  overflow: auto;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border, #3a3a3a);
+  background: #000;
+}
+
+.scene-canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.scene-canvas:focus-visible {
+  outline: 2px solid var(--focus, #7ab7ff);
+  outline-offset: -2px;
+}
+
+.sword-fields {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.sword-fields th,
+.sword-fields td {
+  text-align: left;
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  vertical-align: top;
+}
+
+/*
+ * The listing is monospaced because it is a disassembly: a reader comparing it
+ * against ScummVM's own output needs the columns to line up.
+ */
+.sword-listing {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sword-listing-entry {
+  margin-top: 0.5rem;
+  opacity: 0.75;
+}
+
+.sword-listing-line {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.sword-operand {
+  width: 7ch;
+  font: inherit;
+}
+
+/*
+ * A call is a block rather than a line: it carries a field per argument, and
+ * those wrap. The name stays on the first line so a reader scanning for
+ * `fnWalk` still scans one column.
+ */
+.sword-call {
+  flex-wrap: wrap;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.sword-call-name {
+  font-weight: 600;
+}
+
+.sword-call-count {
+  color: var(--muted);
+}
+
+.sword-call-fields {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: 0.25rem;
+}
+
+.operand-field {
+  flex: 0 1 22rem;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.operand-field > span:first-child {
+  flex: 0 0 9rem;
+}
+
+/* The hint sits under the control on its own line, full width of the field. */
+.operand-hint {
+  flex: 1 0 100%;
+  padding-left: 9.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.sword-text-line {
+  flex: 1;
+  min-width: 12rem;
+  font: inherit;
+}
+
+.sword-palette {
+  display: grid;
+  grid-template-columns: repeat(16, var(--target-min));
+  gap: 1px;
+}
+
+/* 2.5.8: these were 1.25rem square, which is 20px and fails it. A colour here
+   is a control before it is a picture, so it is the shared token's size. */
+.sword-swatch {
+  width: var(--target-min);
+  height: var(--target-min);
+  border: 1px solid var(--border, #3a3a3a);
+  padding: 0;
+  cursor: pointer;
+}
+
+.sword-run-list {
+  width: 100%;
+  min-height: 8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+/*
+ * The picture panel both Broken Sword surfaces use.
+ *
+ * Scrolled rather than scaled, for the same reason the screen canvas above it
+ * is: a sprite frame is drawn at its true size because an author replacing one
+ * is matching pixels, and a frame shrunk to fit is a frame they cannot aim at.
+ */
+.sword-picture {
+  margin-bottom: 0.75rem;
+}
+
+.sword-picture-canvas {
+  display: inline-block;
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border, #3a3a3a);
+  /* Transparent pixels are drawn as nothing, and nothing over black is black.
+     The checker is what makes a hole look like a hole. */
+  background-color: #2a2a2a;
+  background-image:
+    linear-gradient(45deg, #202020 25%, transparent 25%),
+    linear-gradient(-45deg, #202020 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #202020 75%),
+    linear-gradient(-45deg, transparent 75%, #202020 75%);
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+}
+
+.sword-frame-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 0.4rem;
+  max-height: 6rem;
+  overflow-y: auto;
+}
+
+.sword-frame {
+  min-width: 2rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.3rem;
+  background: var(--panel, #262626);
+  color: inherit;
+  border: 1px solid var(--border, #3a3a3a);
+  cursor: pointer;
+}
+
+.sword-frame[aria-checked='true'] {
+  border-color: var(--focus, #7ab7ff);
+  background: var(--selected, #33445a);
+}
+
+.sword-frame:focus-visible {
+  outline: 2px solid var(--focus, #7ab7ff);
+  outline-offset: 1px;
+}
+
+.sword-picture-buttons {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.4rem 0;
+}
+
+/* Declaring a SCI Version the probes could not settle (ADR 0020). Beneath the
+   refusal rather than beside it: the warning is the thing to read first, and a
+   control above it would read as the way out of an inconvenience. */
+.sci-declare-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--line, #444);
+  border-radius: 4px;
+}
+
+.sci-declare-bar .sci-note {
+  flex-basis: 100%;
+  margin: 0;
+  opacity: 0.8;
+}
+
+/* The SCI room canvas (ADR 0037). Sized by the Picture it draws and scaled
+   down to the pane, because King's Quest VII's Pictures are 640x480 and a
+   room that needs a horizontal scroll bar to be seen is not a room surface. */
+.sci-room-canvas {
+  margin: 8px 0;
+  max-width: 100%;
+}
+
+.sci-room-surface {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  border: 1px solid var(--line, #444);
+  border-radius: 4px;
+  /* A cel is art authored at one pixel per pixel, and a room shown at half
+     size is still made of those pixels. Smoothing them turns a sprite into a
+     blur and hides exactly the detail somebody opened the room to look at. */
+  image-rendering: pixelated;
+  background: #1b1b22;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.sci-room-surface:focus-visible {
+  outline: 2px solid var(--focus, #7fd1ff);
+  outline-offset: 2px;
+}
+
+.sci-room-things {
+  margin-top: 8px;
+}
+
+/* The name doubles as the way to select the thing, so it is a button and is
+   styled as the text it replaced rather than as a second control. */
+.sci-room-pick {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.sci-room-things tr.selected {
+  outline: 2px solid var(--focus, #7fd1ff);
+}
+
+/* A SCI palette, colour by colour (editor-parity row 24). A grid of native
+   colour inputs rather than a custom picker: the platform's own control is
+   keyboard-reachable and screen-reader-labelled already, which row 32 asks of
+   every widget on this surface. */
+.sci-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(3.25rem, 1fr));
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.sci-palette-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.sci-palette-swatch input[type='color'] {
+  inline-size: 100%;
+  block-size: 2rem;
+  padding: 0;
+  border: 1px solid var(--border, #444);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}
+
+.sci-palette-index {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The room pane's two exports: the place, and whatever is selected on it. */
+.sci-room-exports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+
+/*
+ * A View's cels, picked one at a time and played back.
+ *
+ * `docs/editor-parity.md` rows 15 and 18, whose Noes were not facts about SCI:
+ * nothing on this surface ever drew a frame, so there was none to pick. The
+ * strip is deliberately the same shape as `.sword-frame-strip` — the two
+ * families ask an author for the same gesture, and ADR 0036's rule is that
+ * they share a widget's *terms* while never sharing a record.
+ */
+.sci-frame-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 0.4rem;
+  max-height: 6rem;
+  overflow-y: auto;
+}
+
+.sci-loop-picker {
+  margin-bottom: 0.6rem;
+}
+
+.sci-frame {
+  min-width: 2rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.3rem;
+  background: var(--panel, #262626);
+  color: inherit;
+  border: 1px solid var(--border, #3a3a3a);
+  cursor: pointer;
+}
+
+.sci-frame[aria-checked='true'] {
+  border-color: var(--focus, #7ab7ff);
+  background: var(--selected, #33445a);
+}
+
+.sci-frame:focus-visible {
+  outline: 2px solid var(--focus, #7ab7ff);
+  outline-offset: 1px;
+}
+
+.sci-cel-figure {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  min-height: 4rem;
+  margin-bottom: 0.3rem;
+  /* A checkerboard, so a cel's transparent pixels read as transparent rather
+     than as whatever colour the panel happens to be. */
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(45deg, #232323 25%, transparent 25%),
+    linear-gradient(-45deg, #232323 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #232323 75%),
+    linear-gradient(-45deg, transparent 75%, #232323 75%);
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+  padding: 0.3rem;
+  overflow: auto;
+}
+
+.sci-cel-canvas {
+  image-rendering: pixelated;
+  display: block;
+}
+
+.sci-play {
+  margin-bottom: 0.4rem;
+}
