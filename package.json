@@ -1,6 +1,6 @@
 {
   "name": "mgi-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": false,
   "description": "MGI (Multi Game Interpreter) — a web based interpreter for LucasArts SCUMM and Sierra AGI adventure games, written in TypeScript",
   "keywords": [
