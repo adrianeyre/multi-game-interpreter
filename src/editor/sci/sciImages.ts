@@ -218,15 +218,7 @@ export function renderSciCelPicture(
   }
   if (composition.cels.length === 0) return 'This Picture holds no cels to draw.';
 
-  const colours = beneath ? beneath.colours.map((entry) => [...entry]) : blackTable();
-  for (const entry of readSciPalette(bytes, composition.paletteOffset)) {
-    if (entry.index < 0 || entry.index > 255) continue;
-    // The used flag is Sierra's merge rule and applies here for the same
-    // reason it applies on screen: an unused entry is three zero bytes behind
-    // a flag, not a colour the Picture is asking for.
-    if (entry.used === false) continue;
-    colours[entry.index] = [entry.r, entry.g, entry.b];
-  }
+  const colours = sciCelPictureColours(bytes, composition.paletteOffset, beneath);
 
   // The canvas is what the Picture declares, or what its items cover where it
   // declares nothing — a SCI1.1 Picture says no resolution and its one cel is
@@ -266,6 +258,31 @@ export function renderSciCelPicture(
     }
   }
   return { width, height, rgba };
+}
+
+/**
+ * A cel Picture's colours: the game's own palette, with the Picture's patch
+ * over it (see `renderSciCelPicture` for why it is a patch and not a table).
+ * The same table the export composes with and the brush paints in, so a pixel
+ * painted in a colour looks on the canvas the way it exports.
+ */
+export function sciCelPictureColours(
+  bytes: Uint8Array,
+  paletteOffset: number,
+  beneath?: SciColours,
+): Array<[number, number, number]> {
+  const colours: Array<[number, number, number]> = (beneath ? beneath.colours : blackTable()).map(
+    (entry) => [entry[0], entry[1], entry[2]],
+  );
+  for (const entry of readSciPalette(bytes, paletteOffset)) {
+    if (entry.index < 0 || entry.index > 255) continue;
+    // The used flag is Sierra's merge rule and applies here for the same
+    // reason it applies on screen: an unused entry is three zero bytes behind
+    // a flag, not a colour the Picture is asking for.
+    if (entry.used === false) continue;
+    colours[entry.index] = [entry.r, entry.g, entry.b];
+  }
+  return colours;
 }
 
 /** Pixels between glyphs on a font sheet, so two neighbours stay two. */

@@ -62,6 +62,7 @@ import type { VgaFileLayout } from './vgaFile.js';
 import { readVgaScript, type VgaInstruction, type VgaOperand } from './vgaScript.js';
 import { vgaHasWideOpcodes } from './vgaOpcodeTables.js';
 import { readVgaPaletteBank } from './vgaPalette.js';
+import { vgaReferenceHasHandler } from './vgaReferenceSlots.js';
 import { RecordingVgaHost, type VgaHost } from './vgaHost.js';
 import type { IndexedBitmap } from './agosImage.js';
 
@@ -504,6 +505,35 @@ export class VgaMachine {
   delaysSuspended = 0;
   /** Scripts that suspended on a `WAIT_SYNC`, counted for the report. */
   syncWaitsSuspended = 0;
+  /**
+   * Sprites asleep on a `WAIT_END`, and the id of the sprite each waits for.
+   *
+   * `_waitEndTable` in the reference. A side table rather than a field on
+   * {@link VgaSprite}, because the wait is a relation between two sprites and
+   * is dissolved from the *other* one's end — {@link spriteEnded} is the only
+   * place that reads it by the id waited for.
+   */
+  private readonly waitingForEnd = new Map<VgaSprite, number>();
+  /** Scripts that suspended on a `WAIT_END`, counted for the report. */
+  endWaitsSuspended = 0;
+  /**
+   * Dissolves a script asked for, whose *transition* this machine does not
+   * animate.
+   *
+   * Elvira 2's `DISSOLVE_IN` and `DISSOLVE_OUT` reveal or cover window 4 a few
+   * random pixels at a time over many frames. Their end state is performed
+   * where it differs from what is already on screen (see each opcode); the
+   * frames in between are not, and this is the count of how often that was so.
+   */
+  dissolvesRequested = 0;
+  /**
+   * Where `SETRANDOM` gets its numbers: `[0, 1)`, as `Math.random` gives.
+   *
+   * A field so a test can make the draw deterministic. The reference uses its
+   * own seeded generator, and nothing a script does depends on *which* random
+   * number it got — only on its range, which is what a test checks.
+   */
+  random: () => number = Math.random;
   /** `CHAIN_TO`s whose sprite had no animation-table entry. */
   readonly unresolvedChains: number[] = [];
   /**
@@ -824,6 +854,7 @@ export class VgaMachine {
       if (!sprite) break;
       this.queued.delete(sprite);
       if (sprite.halted || sprite.wakeAtTick !== null || sprite.waitingForSync !== null) continue;
+      if (this.waitingForEnd.has(sprite)) continue;
       this.run(sprite.resumeOffset ?? sprite.scriptOffset, sprite);
     }
     this.reap();
@@ -856,6 +887,7 @@ export class VgaMachine {
     this.queued.clear();
     this.repeatCounters.clear();
     this.pendingRepeat = null;
+    this.waitingForEnd.clear();
     this.resetsRun += 1;
   }
 
@@ -887,9 +919,113 @@ export class VgaMachine {
    * calls this on every loaded machine.
    */
   stopSprite(id: number): void {
+    let stopped = false;
     for (const sprite of this.sprites) {
-      if (sprite.id === id) sprite.halted = true;
+      if (sprite.id !== id || sprite.halted) continue;
+      sprite.halted = true;
+      stopped = true;
     }
+    // The reference's `vcStopAnimation` halts through `vc25_halt_sprite`, so a
+    // stopped sprite ends a `WAIT_END` exactly as one halting itself does.
+    if (stopped) this.spriteEnded(id);
+  }
+
+  /**
+   * A sprite has halted: wake whatever was waiting for it to end.
+   *
+   * `checkWaitEndTable`, which `vc25_halt_sprite` runs before it removes the
+   * sprite. Each waiter is queued behind the work already due, as a `SYNC`
+   * wake is — the reference appends an `ANIMATE_EVENT` for it at the base
+   * delay — and carries on from the instruction after its `WAIT_END`.
+   */
+  private spriteEnded(id: number): void {
+    for (const [waiter, awaited] of [...this.waitingForEnd]) {
+      if (awaited !== id) continue;
+      this.waitingForEnd.delete(waiter);
+      this.enqueue(waiter);
+    }
+  }
+
+  /**
+   * Whether this machine has a live sprite with an id — the reference's
+   * `isSpriteLoaded` as far as one machine can see.
+   */
+  private spriteLoaded(id: number): boolean {
+    return this.sprites.some((sprite) => sprite.id === id && !sprite.halted);
+  }
+
+  /**
+   * Records an opcode whose slot the reference never assigned a routine to.
+   *
+   * Different words from an ordinary gap on purpose: this is a script and a
+   * Version disagreeing — the reference would stop with "Invalid VGA opcode" —
+   * not something waiting to be written. See `vgaReferenceSlots.ts`.
+   */
+  private noReferenceHandler(instruction: VgaInstruction): Step {
+    this.unimplemented.add(`${instruction.name}: no handler in the reference for ${this.table}`);
+    return NEXT;
+  }
+
+  /** A window's rectangle in pixels, or null when no script has defined it. */
+  private windowRect(
+    window: number,
+  ): { x: number; y: number; width: number; height: number } | null {
+    const rectangle = this.windows.get(window);
+    if (!rectangle) return null;
+    return {
+      x: rectangle[0] * 16,
+      y: rectangle[1],
+      width: rectangle[2] * 16,
+      height: rectangle[3],
+    };
+  }
+
+  /**
+   * Copies raw bytes out of the image resource onto the screen.
+   *
+   * The two Elvira 2 / Waxworks opcodes that put a whole picture up
+   * (`FULL_SCREEN`, `INTRO`) do not draw cels: they copy rows of the second
+   * VGA file byte for byte. Returns false, copying nothing, when the resource
+   * is too short for the rows asked for — a truncated screen is a wrong one.
+   */
+  private copyFromImageResource(
+    source: number,
+    x: number,
+    y: number,
+    width: number,
+    rows: number,
+  ): boolean {
+    if (source < 0 || source + width * rows > this.pixels.length) return false;
+    for (let row = 0; row < rows; row += 1) {
+      const targetRow = y + row;
+      if (targetRow < 0 || targetRow >= this.target.height) continue;
+      const columns = Math.min(width, this.target.width - x);
+      if (columns <= 0) continue;
+      const from = source + row * width;
+      this.target.pixels.set(
+        this.pixels.subarray(from, from + columns),
+        targetRow * this.target.width + x,
+      );
+    }
+    return true;
+  }
+
+  /**
+   * The palette at offset 32 of the image resource, put on screen.
+   *
+   * `fullFade` in the reference fades the display towards 256 six-bit colours
+   * stored there, four levels a step, sixty-four steps — so its end state is
+   * exactly that palette, widened by four. The steps between are not animated
+   * here and are counted in {@link fadesRequested}, as every fade is.
+   */
+  private fullScreenPalette(): void {
+    const rgb = new Uint8Array(256 * 3);
+    for (let index = 0; index < rgb.length; index += 1) {
+      rgb[index] = Math.min(255, (this.pixels[32 + index] ?? 0) * 4);
+    }
+    this.target.setPalette?.(0, rgb);
+    this.palettesSet += 1;
+    this.fadesRequested += 1;
   }
 
   /** Runs every sprite that has not halted and is not asleep, once. */
@@ -897,6 +1033,7 @@ export class VgaMachine {
     for (const sprite of this.sprites) {
       if (sprite.halted) continue;
       if (sprite.wakeAtTick !== null || sprite.waitingForSync !== null) continue;
+      if (this.waitingForEnd.has(sprite)) continue;
       this.run(sprite.resumeOffset ?? sprite.scriptOffset, sprite);
     }
   }
@@ -1085,7 +1222,10 @@ export class VgaMachine {
         if (sprite) sprite.priority = operand(0);
         return NEXT;
       case 'HALT_SPRITE':
-        if (sprite) sprite.halted = true;
+        if (sprite) {
+          sprite.halted = true;
+          this.spriteEnded(sprite.id);
+        }
         return NEXT;
       /**
        * Three more whose behaviour here is a record, for the reason
@@ -1651,7 +1791,356 @@ export class VgaMachine {
         this.host.computePathfinder();
         return NEXT;
 
+      /**
+       * `WAIT_END` sleeps until another sprite halts.
+       *
+       * `vc17_waitEnd`: if the named sprite is loaded, the running one is put
+       * in the wait-end table and suspends; `vc25_halt_sprite` later wakes it
+       * (see {@link spriteEnded}) and it carries on after this instruction. If
+       * the sprite is *not* loaded the reference simply runs on — there is no
+       * end to wait for — and so does this.
+       *
+       * One scope limit, stated rather than hidden: the reference's
+       * `isSpriteLoaded(id, id / 100)` looks in the game-wide sprite array,
+       * and this machine sees one zone's sprites. A sprite named in another
+       * zone reads as not loaded, so the script runs on rather than waiting —
+       * the same boundary `SET_PRIORITIES` keeps.
+       */
+      case 'WAIT_END': {
+        const id = operand(0);
+        if (!this.spriteLoaded(id)) return NEXT;
+        if (sprite) this.waitingForEnd.set(sprite, id);
+        this.endWaitsSuspended += 1;
+        return SUSPEND;
+      }
+
+      /**
+       * `SAVE_SCREEN` keeps window 4's picture as the scene behind the screen.
+       *
+       * `vc32_saveScreen` (outside Personal Nightmare) copies the window-4 back
+       * screen into the background buffer at window 4's rectangle — which is
+       * what a later masked draw reveals. This machine draws window 4 straight
+       * onto the screen rather than into a back screen first, so the screen's
+       * window-4 rectangle *is* that back screen, and it is what is copied.
+       */
+      case 'SAVE_SCREEN': {
+        const rect = this.windowRect(4);
+        const background = this.target.background;
+        if (!rect) {
+          this.unimplemented.add('SAVE_SCREEN: window 4 is not defined');
+          return NEXT;
+        }
+        if (!background) {
+          this.unimplemented.add('SAVE_SCREEN: no background surface');
+          return NEXT;
+        }
+        const width = Math.min(rect.width, this.target.width - rect.x);
+        for (let row = rect.y; row < Math.min(rect.y + rect.height, this.target.height); row += 1) {
+          const start = row * this.target.width + rect.x;
+          background.set(this.target.pixels.subarray(start, start + width), start);
+        }
+        return NEXT;
+      }
+
+      /**
+       * `POKE_PALETTE` sets one palette entry from a `0RGB` word.
+       *
+       * `vc37_pokePalette`: entry `offs` takes the colour's three nibbles, each
+       * times thirty-two — the old-bundle palette encoding, one colour instead
+       * of a bank. Clamped at 255 rather than wrapped, as `readVgaPaletteBank`
+       * clamps the same encoding. The Atari ST remap Elvira 2 applies is not
+       * made: nothing tells this machine which platform it is running.
+       */
+      case 'POKE_PALETTE': {
+        const colour = operand(1);
+        const rgb = new Uint8Array([
+          Math.min(255, ((colour & 0xf00) >> 8) * 32),
+          Math.min(255, ((colour & 0x0f0) >> 4) * 32),
+          Math.min(255, (colour & 0x00f) * 32),
+        ]);
+        this.target.setPalette?.(operand(0) & 255, rgb);
+        this.palettesSet += 1;
+        return NEXT;
+      }
+
+      /**
+       * `SET_WINDOW_PALETTE` moves every pixel of a window into another bank.
+       *
+       * `vc45_setWindowPalette` walks the window a **little-endian word** — two
+       * pixels — at a time, keeps each byte's low nibble (the colour within
+       * the bank), clears both high nibbles and ORs in `colour * 16`. Kept as
+       * that word arithmetic rather than tidied into "set the bank", because
+       * the tidy version is not what it does: with a colour below sixteen the
+       * second pixel of each pair ends in bank zero, and a colour that spells
+       * both banks (`0x101`) is how a script sets them together.
+       *
+       * Window 4's reference target is its back screen, which here is the
+       * screen (see `SAVE_SCREEN`). Elvira 2's window 7 is widened eight
+       * pixels to the left, as the reference widens it.
+       */
+      case 'SET_WINDOW_PALETTE': {
+        const number = operand(0);
+        const rect = this.windowRect(number);
+        if (!rect) {
+          this.unimplemented.add(`SET_WINDOW_PALETTE: window ${number} is not defined`);
+          return NEXT;
+        }
+        let { x, width } = rect;
+        if (this.table === 'elvira2' && number === 7) {
+          x -= 8;
+          width += 8;
+        }
+        const high = (operand(1) * 16) & 0xffff;
+        const pixels = this.target.pixels;
+        for (let row = rect.y; row < Math.min(rect.y + rect.height, this.target.height); row += 1) {
+          for (let column = x; column < x + width && column < this.target.width; column += 2) {
+            if (column < 0) continue;
+            const at = row * this.target.width + column;
+            const word = (((pixels[at] ?? 0) | ((pixels[at + 1] ?? 0) << 8)) & 0x0f0f) | high;
+            pixels[at] = word & 255;
+            if (column + 1 < this.target.width) pixels[at + 1] = word >> 8;
+          }
+        }
+        return NEXT;
+      }
+
+      /**
+       * The three palette-slot loads (`vc46`–`vc48`): sixteen colours from the
+       * old-bundle table into bank 1, 2 or 3.
+       *
+       * `setPaletteSlot(srcOffs, slot)` reads bank `srcOffs` of the table the
+       * script resource's header points at and writes it at `slot * 16` —
+       * `SET_PALETTE`'s job with the destination fixed by the opcode.
+       */
+      case 'SET_PALETTE_SLOT1':
+      case 'SET_PALETTE_SLOT2':
+      case 'SET_PALETTE_SLOT3': {
+        const slot = Number(instruction.name.slice(-1));
+        const bank = readVgaPaletteBank(this.scripts, 0, operand(0), 'old-bundle');
+        this.target.setPalette?.(slot * 16, bank.rgb);
+        this.palettesSet += 1;
+        return NEXT;
+      }
+
+      /**
+       * `DISSOLVE_IN` reveals window 4's back screen a few pixels at a time.
+       *
+       * `vc53_dissolveIn` copies the back screen's low nibbles onto the screen
+       * at random, keeping the screen's banks, until the window is covered.
+       * Here the back screen *is* the screen (see `SAVE_SCREEN`), so the end
+       * state is already on it and only the transition is missing — counted,
+       * not performed.
+       */
+      case 'DISSOLVE_IN':
+        this.dissolvesRequested += 1;
+        return NEXT;
+
+      /**
+       * `DISSOLVE_OUT` covers a window with one colour, a few pixels at a time.
+       *
+       * `vc54_dissolveOut` writes `colour | (bank of the window's first pixel)`
+       * over random mirrored points until — with eight passes' worth of points
+       * per pixel — the window is, to one part in a few thousand, all that
+       * colour. That end state is performed; the random reveal is counted.
+       * It matters that it is performed: the room drawn next lands straight on
+       * the screen here, and without the cover it would land on the old one.
+       */
+      case 'DISSOLVE_OUT': {
+        const number = operand(0);
+        const rect = this.windowRect(number);
+        this.dissolvesRequested += 1;
+        if (!rect) {
+          this.unimplemented.add(`DISSOLVE_OUT: window ${number} is not defined`);
+          return NEXT;
+        }
+        const first = this.target.pixels[rect.y * this.target.width + rect.x] ?? 0;
+        const colour = (operand(1) | (first & 0xf0)) & 255;
+        const width = Math.min(rect.width, this.target.width - rect.x);
+        for (let row = rect.y; row < Math.min(rect.y + rect.height, this.target.height); row += 1) {
+          const start = row * this.target.width + rect.x;
+          this.target.pixels.fill(colour, start, start + width);
+        }
+        return NEXT;
+      }
+
+      /**
+       * `FULL_SCREEN` puts up a whole-screen picture and fades to its colours.
+       *
+       * `vc56_fullScreen` copies 320-byte rows from offset 800 of the image
+       * resource onto the screen and then runs `fullFade` towards the palette
+       * at offset 32. See {@link fullScreenPalette} for the fade.
+       */
+      case 'FULL_SCREEN':
+        if (!this.copyFromImageResource(800, 0, 0, 320, this.target.height)) {
+          this.unimplemented.add('FULL_SCREEN: the image resource is too short for a screen');
+          return NEXT;
+        }
+        this.fullScreenPalette();
+        return NEXT;
+
+      /**
+       * `CHECK_CODE_WHEEL` passes the copy protection.
+       *
+       * `vc58_checkCodeWheel` zeroes variable 0 and nothing else: the check is
+       * the reference's too, and it always succeeds.
+       */
+      case 'CHECK_CODE_WHEEL':
+        this.variables[0] = 0;
+        return NEXT;
+
+      /**
+       * `IF_EGA` guards an instruction for the EGA release, and this is not it.
+       * `vc59_ifEGA` skips unconditionally, so the guarded instruction never
+       * runs on the VGA releases this family plays.
+       */
+      case 'IF_EGA':
+        return SKIP;
+
+      /**
+       * `INTRO` (`vc61`) is Waxworks' title sequence, and is raw copies.
+       *
+       * Part `a` lives at a fixed offset in the image resource — the first at
+       * 64800, each later one 26288 further on, then 800 past that — and is a
+       * 144×177 block at (88, 23); part 5 is instead a 208×17 strip at
+       * (56, 157), and part 6 is a full screen, then part 4's block, then the
+       * strip from 175088, then a fade. The offsets are the reference's
+       * arithmetic evaluated, because they are facts about the resource.
+       *
+       * Waxworks only: Elvira 2's name table spells slot 61 `INTRO` too, but
+       * Elvira 2's opcode table assigns nothing there. A part of zero is
+       * reported rather than run — the reference's unsigned `a - 1` makes it a
+       * loop four thousand million steps long.
+       */
+      case 'INTRO': {
+        if (this.table !== 'waxworks') return this.noReferenceHandler(instruction);
+        const part = operand(0);
+        if (part < 1) {
+          this.unimplemented.add(`INTRO: no part ${part}`);
+          return NEXT;
+        }
+        let copied = true;
+        if (part === 6) copied = this.copyFromImageResource(800, 0, 0, 320, this.target.height);
+        const skips = part === 6 ? 3 : part - 1;
+        let source = 64800 + skips * 26288 + 800;
+        if (copied && part !== 5) {
+          copied = this.copyFromImageResource(source, 88, 23, 144, 177);
+          source = 175088;
+        }
+        if (copied && (part === 5 || part === 6)) {
+          copied = this.copyFromImageResource(source, 56, 157, 208, 17);
+        }
+        if (!copied) {
+          this.unimplemented.add(`INTRO: the image resource is too short for part ${part}`);
+          return NEXT;
+        }
+        if (part === 6) this.fullScreenPalette();
+        return NEXT;
+      }
+
+      /**
+       * `COMPUTEXY` (`vc78`) puts the running sprite on a point of a route.
+       *
+       * The route is variable 12 and the point variable 13; the point's x and
+       * y go into variables 15 and 16 and onto the sprite. The Feeble Files
+       * then clears bit 85 and, where bit 74 asks for it, re-centres its
+       * scrolling view — which this machine has no Feeble scroll to do, and
+       * says so.
+       */
+      case 'COMPUTEXY': {
+        const route = (this.variables[12] ?? 0) & 0xffff;
+        const index = (this.variables[13] ?? 0) & 0xffff;
+        const point = this.host.pathRoute(route)?.[index];
+        if (!point) {
+          this.unimplemented.add(`COMPUTEXY: no point ${index} on route ${route}`);
+          return NEXT;
+        }
+        const [x, y] = point;
+        this.variables[15] = x;
+        this.variables[16] = y;
+        if (sprite) {
+          sprite.x = x;
+          sprite.y = y;
+        }
+        if (this.table === 'feeblefiles') {
+          this.bits.delete(85);
+          if (this.bits.has(74))
+            this.unimplemented.add('COMPUTEXY: centerScroll is not implemented');
+        }
+        return NEXT;
+      }
+
+      /**
+       * `COMPUTEPOSNUM` (`vc79`) finds how far down a route a row is.
+       *
+       * It counts the route's leading points whose y is at or above variable
+       * 16 — the reference walks until a point lies below it — and writes the
+       * count to variable 13, which is the index `COMPUTEXY` reads next.
+       */
+      case 'COMPUTEPOSNUM': {
+        const route = (this.variables[12] ?? 0) & 0xffff;
+        const points = this.host.pathRoute(route);
+        if (!points) {
+          this.unimplemented.add(`COMPUTEPOSNUM: no route ${route}`);
+          return NEXT;
+        }
+        const y = this.variables[16] ?? 0;
+        let position = 0;
+        while (position < points.length && y >= (points[position]?.[1] ?? 0)) position += 1;
+        this.variables[13] = position;
+        return NEXT;
+      }
+
+      /**
+       * `SETOVERLAYIMAGE` (`vc80`) is `SET_SPRITE_XY` with the flags fixed to
+       * AGOS 2's `kDFOverlayed` (0x10).
+       *
+       * That bit is `compressedFlip` in the older draw flags, and the painter
+       * does not tell the two apart by Version yet — so the overlaid draw is
+       * named as a missing flag rather than left to be read as a flip.
+       */
+      case 'SETOVERLAYIMAGE':
+        if (sprite) {
+          sprite.image = this.imageOperand(instruction.operands[0]);
+          sprite.x += operand(1);
+          sprite.y += operand(2);
+          sprite.flags = 0x10;
+        }
+        this.unimplementedFlags.add('overlayed (AGOS 2 kDFOverlayed)');
+        return NEXT;
+
+      /**
+       * `SETRANDOM` (`vc81`) sets a variable to a random number below a bound.
+       * The reference asks for `0..value - 1` inclusive in sixteen bits, so a
+       * bound of zero wraps to the whole range, and that is kept.
+       */
+      case 'SETRANDOM': {
+        const range = ((operand(1) - 1) & 0xffff) + 1;
+        this.variables[this.index(instruction.operands[0])] = Math.floor(this.random() * range);
+        return NEXT;
+      }
+
+      /** `GETPATHVALUE` (`vc82`): the next path value into a variable. */
+      case 'GETPATHVALUE': {
+        const value = this.host.nextPathValue();
+        if (value === null) {
+          this.unimplemented.add('GETPATHVALUE: no path value to read');
+          return NEXT;
+        }
+        this.variables[this.index(instruction.operands[0])] = value & 255;
+        return NEXT;
+      }
+
+      case 'PLAYSOUNDLOOP':
+        this.host.playSoundLoop(operand(0), operand(1), operand(2));
+        return NEXT;
+      case 'STOPSOUNDLOOP':
+        this.host.stopSoundLoop();
+        return NEXT;
+
       default:
+        if (!vgaReferenceHasHandler(this.table, instruction.opcode)) {
+          return this.noReferenceHandler(instruction);
+        }
         this.unimplemented.add(instruction.name);
         return NEXT;
     }

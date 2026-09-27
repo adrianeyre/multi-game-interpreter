@@ -164,6 +164,12 @@ export interface AkosCostumeOptions {
    * drawing, keep exercising the shorter resource.
    */
   rgbs?: number[];
+  /**
+   * The `AKHD` codec, and the cel's encoded bytes to go with it. Default: a
+   * codec 5 (BOMP) cel of `celColor`. The cel stays 4x2 whatever encodes it.
+   */
+  codec?: number;
+  cel?: number[];
 }
 
 export function buildAkosCostume(options: AkosCostumeOptions = {}): number[] {
@@ -171,7 +177,7 @@ export function buildAkosCostume(options: AkosCostumeOptions = {}): number[] {
   const celColor = options.celColor ?? 6;
   const bompLine = (control: number[]) => [...u16le(control.length), ...control];
   const run = (count: number, color: number) => [((count - 1) << 1) | 1, color];
-  const cel = [...bompLine(run(4, celColor)), ...bompLine(run(4, celColor))];
+  const cel = options.cel ?? [...bompLine(run(4, celColor)), ...bompLine(run(4, celColor))];
 
   const chores = 16;
 
@@ -181,7 +187,7 @@ export function buildAkosCostume(options: AkosCostumeOptions = {}): number[] {
       ...u16le(0), // flags: four directions, drawn facing left
       ...u16le(chores),
       ...u16le(1), // cels
-      ...u16le(5), // codec 5: BOMP
+      ...u16le(options.codec ?? 5), // codec 5: BOMP, unless asked otherwise
       ...u16le(1), // layers
     ]),
     // Every colour maps to itself, so a cel's own index is the screen colour

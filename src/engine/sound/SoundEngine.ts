@@ -1,15 +1,16 @@
 import { detectAudioFormat, isPlayableFormat, loadAudio } from '../../authoring/audio.js';
 import type { ProjectAudio } from '../../authoring/audio.js';
 import { findChunkDeep, readChunkHeader } from '../resource/Chunk.js';
-import {
-  findHookJumps,
-  findMarkers,
-  jumpTargetTick,
-  renderScummMusic,
-  secondsToTicks,
-  ticksToSeconds,
-} from './renderMusic.js';
-import { readScummMusic } from './scummAdl.js';
+import { renderScummMusic, secondsToTicks } from './renderMusic.js';
+import { readScummMusic, readScummScore } from './scummAdl.js';
+import { ImuseCommands } from './imuse.js';
+import { ImusePlayer, readStartParameters, type SavedImusePlayer } from './ImusePlayer.js';
+import { GlobalInstruments } from './imuseInstruments.js';
+import { ImuseMixer } from './imuseMixer.js';
+import type { SavedImuseCommands } from './imuse.js';
+import { LiveMusicStream } from './liveMusic.js';
+import { OPL2_RATE } from './opl2/Opl2.js';
+import { findOldBundleSpeaker, findSpeakerBlock, SpeakerSequence } from './pcSpeaker.js';
 import type { MidiFile } from './midi.js';
 import { findSoundBlock } from './soundChunks.js';
 import { DigitalImuse, type DigitalAudio } from './v7/digitalImuse';
@@ -37,10 +38,11 @@ import { readSpeechSample, type SpeechSample } from './speech.js';
  * `ROL` and `SPK` hold sequenced music for AdLib, Roland MT-32 and the PC
  * speaker.
  *
- * Digitised sound is decoded and played through Web Audio. AdLib music is
- * synthesised: the `ADL ` score is read as MIDI and played through an emulated
- * OPL2, the chip the music was written for. Roland and PC speaker scores are
- * not, because neither of those chips is emulated here.
+ * Digitised sound is decoded and played through Web Audio. Music is sequenced
+ * live (`ImusePlayer`) and streamed: an `ADL ` score through an emulated OPL2,
+ * the chip it was written for; a Roland or General MIDI score through the same
+ * OPL2 with a General MIDI bank, since no MT-32 is emulated; and a speaker
+ * score — v5's `SPK `, or a v3/v4 `WA` block — through an emulated PC speaker.
  *
  * A resource with nothing playable in it is still tracked as playing for a
  * short while, so that scripts polling `isSoundRunning` see a plausible
@@ -53,6 +55,13 @@ export type BundleReader = (start: number, end: number) => Promise<Uint8Array | 
 
 /** v7 bundle audio is 22050 Hz, as the format fixes it. */
 const BUNDLE_SPEECH_RATE = 22050;
+
+/** The iMUSE part of a save. */
+export interface SavedImuse {
+  players: SavedImusePlayer[];
+  commands: SavedImuseCommands;
+  globals: (number[] | null)[];
+}
 
 export class SoundEngine {
   private context: AudioContext | null = null;
@@ -820,6 +829,10 @@ export class SoundEngine {
       return;
     }
 
+    // A score is sequenced live rather than rendered, so that the commands a
+    // script sends while it plays can change it.
+    if (this.startLive(id)) return;
+
     const buffer = this.getBuffer(id) ?? this.renderMusicBuffer(id);
     if (!buffer) {
       // A format with no decoder: remember it so `isSoundRunning` answers
@@ -870,6 +883,8 @@ export class SoundEngine {
 
   /** Where a playing sound has reached, in seconds, or null if it is not. */
   positionOf(id: number): number | null {
+    const live = this.livePlayer(id);
+    if (live) return live.playedSeconds;
     const started = this.startedAt.get(id);
     if (started === undefined || !this.context || !this.playing.has(id)) return null;
     return this.context.currentTime - started + (this.startedFrom.get(id) ?? 0);
@@ -930,6 +945,13 @@ export class SoundEngine {
    * nothing about how the sound is produced.
    */
   setSoundLevel(id: number, level: number): void {
+    // A live player shares the chip with the others, so its level is set in
+    // the chip rather than on a gain node of its own.
+    const player = this.livePlayer(id);
+    if (player) {
+      player.setOutputLevel(level);
+      return;
+    }
     const gain = this.gains.get(id);
     if (gain) gain.gain.value = Math.max(0, Math.min(1, level));
   }
@@ -941,6 +963,12 @@ export class SoundEngine {
    * step in the middle of a held note is audible as a click.
    */
   fadeSoundLevel(id: number, level: number, seconds: number): void {
+    const player = this.livePlayer(id);
+    if (player) {
+      // Sixtieths of a second, which is what iMUSE's own faders count in.
+      player.addParameterFader(1, Math.round(level * 127), Math.round(seconds * 60));
+      return;
+    }
     const gain = this.gains.get(id);
     if (!gain || !this.context) return;
 
@@ -1000,6 +1028,15 @@ export class SoundEngine {
   }
 
   stopSound(id: number): void {
+    const player = this.players.get(id);
+    if (player) {
+      this.players.delete(id);
+      // Clearing the player is what fires the triggers still hung on it. It
+      // leaves the chip after, so its release reaches its own channels.
+      player.clear();
+      this.mixer.remove(player);
+    }
+    this.speakerSequence.stop(id);
     const source = this.playing.get(id);
     if (source) {
       try {
@@ -1017,17 +1054,20 @@ export class SoundEngine {
   }
 
   stopAll(): void {
-    // A trigger belongs to the music it was hung on. Left armed, it would fire
-    // over whatever is playing by then — or over silence.
-    this.clearAllTriggers();
-    this.clearHookTimers();
-    this.armedJumpHook = 0;
-    for (const id of [...this.playing.keys()]) this.stopSound(id);
+    // Each player's triggers fire as it stops, as `stopAllSounds_internal`
+    // clearing every player does in the original.
+    for (const id of [...this.players.keys(), ...this.playing.keys()]) this.stopSound(id);
+    this.speakerSequence.stopAll();
     this.pendingMusic.clear();
   }
 
   isSoundRunning(id: number): boolean {
-    return this.playing.has(id) || this.pendingMusic.has(id);
+    return (
+      this.playing.has(id) ||
+      this.pendingMusic.has(id) ||
+      this.livePlayer(id) !== null ||
+      this.speakerSequence.isPlaying(id)
+    );
   }
 
   /**
@@ -1045,6 +1085,9 @@ export class SoundEngine {
     // and every volume ramp took six times as long as the script asked for,
     // and a piece faded out under a scene that had already moved on.
     this.sequencer.step(secondsPerFrame);
+    this.imuse.step(secondsPerFrame);
+    this.mixerStream?.pump();
+    this.speakerStream?.pump();
 
     // Aged in the same units, so an unplayable sound stops answering
     // "still running" after the length of time it was given rather than after
@@ -1082,6 +1125,10 @@ export class SoundEngine {
     const id = this.playingMusic;
     if (id === null) return null;
 
+    // A live player knows where it is, in its own ticks.
+    const live = this.livePlayer(id);
+    if (live) return live.musicTimer();
+
     const seconds = this.positionOf(id);
     if (seconds === null || seconds < 0) return null;
 
@@ -1111,152 +1158,317 @@ export class SoundEngine {
   private readonly scoreCache = new Map<number, MidiFile | null>();
 
   /**
-   * An iMUSE command, as `soundKludge` delivers it.
+   * An iMUSE command, as `soundKludge` delivers it, and its result.
    *
    * The first element is two bytes in one: the low byte is the command and the
    * high byte its scope. Scope 0 is the sound system — start this, stop that,
    * set the volume — and scope 1 addresses a *player*, the thing sequencing one
-   * piece of music, to make it jump to a marker, set a hook, loop a section or
-   * fade a parameter.
+   * piece of music, to make it jump, loop, arm a hook, transpose or fade.
    *
-   * The scope-0 commands are acted on here, because they are things this engine
-   * can already do and a script issuing them expects to happen: a v6 game stops
-   * its music through `soundKludge`, not through `stopMusic`. Dropping them —
-   * which is what happened before — left music playing over scenes that had
-   * asked for silence.
-   *
-   * The scope-1 commands are recorded and not acted on. They are the actual
-   * dynamic-music feature, and they need a live sequencer: this engine renders
-   * a score to samples up front and plays the result, so there is no playing
-   * position to jump within. Implementing them means reworking the music path,
-   * which is #78's remaining half — logging them at least makes it visible
-   * which ones a real game asks for.
+   * Start, stop and master volume are served here, through the music
+   * sequencer; everything that needs a player's state is `ImuseCommands`'.
+   * The result is what the original leaves in `VAR_SOUNDRESULT`, which is how a
+   * script reads a player parameter or the command queue back.
    *
    * Command numbering follows ScummVM's `IMuseInternal::doCommand`.
    */
-  kludge(args: number[]): void {
-    if (args.length === 0) return;
+  kludge(args: number[]): number {
+    if (args.length === 0) return 0;
 
-    const scope = (args[0] >> 8) & 0xff;
-    const command = args[0] & 0xff;
+    // -1 is not a command: `Sound::soundKludge` takes it as "process the
+    // queued commands now". Commands run as they arrive here, so there is
+    // nothing left to process — Day of the Tentacle sends it constantly,
+    // which is the "command 255 (scope 255)" it used to log.
+    if (args[0] === -1 || (args[0] & 0xffff) === 0xffff) return this.lastResult;
 
-    if (scope === 1) {
-      this.playerCommand(command, args);
-      return;
-    }
-    if (scope !== 0) {
+    // The original reads fixed slots past the end of short lists as zero.
+    const a = [...args, ...new Array<number>(16).fill(0)];
+    const scope = (a[0] >> 8) & 0xff;
+    const command = a[0] & 0xff;
+
+    let result: number | undefined;
+    if (scope === 1) result = this.imuse.playerCommand(command, a);
+    else if (scope === 0) result = this.systemCommand(command, a);
+
+    if (result === undefined) {
       this.unhandledKludge(scope, command, args);
-      return;
+      result = -1;
     }
+    this.lastResult = result;
+    return result;
+  }
 
+  /** What the last command returned, for the "process the queue" marker. */
+  private lastResult = 0;
+
+  private systemCommand(command: number, a: number[]): number | undefined {
     switch (command) {
       case 6: {
         // Master volume, 0-127 in the command's terms.
-        const level = args[1];
-        if (level >= 0 && level <= 127) this.setVolume(level / 127);
-        return;
+        const level = a[1];
+        if (level < 0 || level > 127) return -1;
+        this.setVolume(level / 127);
+        return 0;
       }
+      case 7:
+        return Math.round(this.volume * 127);
       case 8:
-        this.playingMusic = args[1];
-        // Through the sequencer rather than straight to playback: asking for
-        // the piece already playing is now not a restart, which is what stops a
-        // room's music cutting back to its opening bar every time the player
-        // walks through the door.
-        this.sequencer.enter({ id: args[1], crossfadeSeconds: 0 });
-        return;
+        this.startScored(a[1]);
+        return 0;
       case 9:
-        if (this.sequencer.state?.id === args[1]) this.sequencer.leave();
-        else this.stopSound(args[1]);
-        return;
+        this.stopScored(a[1]);
+        return 0;
       case 10:
       case 11:
         this.stopAll();
-        return;
-      case 17: {
-        // A trigger: when the music reaches a marker, run a command. The
-        // command is the rest of the list, and it goes back through this same
-        // handler when it fires — which is how a game strings a sequence of
-        // musical events together without the script staying involved.
-        const sound = args[1];
-        const marker = args[3];
-        if ((args[4] ?? 0) !== 0) this.setTrigger(sound, marker, args.slice(4));
-        else this.clearTrigger(sound, marker);
-        return;
-      }
-      case 19:
-        this.clearTrigger(args[1], args[3]);
-        return;
+        return 0;
       case 2:
       case 3:
         // Documented no-ops in the original too.
-        return;
+        return 0;
       default:
-        this.unhandledKludge(scope, command, args);
+        return this.imuse.systemCommand(command, a);
     }
   }
 
   /**
-   * A command aimed at the thing sequencing a piece of music.
-   *
-   * This engine has no sequencer: it renders a whole score to samples and plays
-   * the buffer. A jump is therefore served by re-rendering the score from its
-   * destination and starting that instead — the same music, with a seam where
-   * the two renderings meet. Not how the original does it, and audibly not, but
-   * the alternative is music that ignores the game.
-   *
-   * The destination is named in beats, which `jumpTargetTick` converts. That
-   * conversion assumes a beat is a quarter note, which is true of the scores
-   * seen so far and is the first thing to check if a jump lands in the wrong
-   * bar on a real game.
+   * Starts a piece through the sequencer rather than straight to playback:
+   * asking for the piece already playing is not a restart, which is what stops
+   * a room's music cutting back to its opening bar every time the player walks
+   * through the door. A piece that has *finished* is started again, though —
+   * the sequencer's state outlives the audio, and a script asking again for
+   * music that has ended wants to hear it.
    */
-  private playerCommand(command: number, args: number[]): void {
-    // 7 is the plain jump: track, beat, tick within the beat.
-    if (command === 7 && this.playingMusic !== null) {
-      this.restartMusicAt(this.playingMusic, args[3] ?? 1, args[4] ?? 0);
-      return;
-    }
-
-    // 12 and 20 arm a hook: a class, then the value the score must carry for a
-    // jump to be taken. Class 0 is the jump hook, which is the one that
-    // branches the music; the others adjust parts and are not served here.
-    if (command === 12 || command === 20) {
-      if ((args[2] ?? 0) === 0) this.armJumpHook(args[3] ?? 0);
-      else this.unhandledKludge(1, command, args);
-      return;
-    }
-
-    // 9 loops a section: a count, then the beat and tick of each end.
-    if (command === 9 && this.playingMusic !== null) {
-      this.loopMusicBetween(
-        this.playingMusic,
-        args[3] ?? 1,
-        args[4] ?? 0,
-        args[5] ?? 0,
-        args[6] ?? 0,
-      );
-      return;
-    }
-
-    // 13 fades a parameter — volume, in every use seen — to a target over a
-    // time. Both are in the command's own 0-127 scale.
-    if (command === 13) {
-      this.fadeVolume(args[2] ?? 127, args[3] ?? 0);
-      return;
-    }
-
-    this.unhandledKludge(1, command, args);
+  private startScored(id: number): void {
+    this.playingMusic = id;
+    if (this.sequencer.state?.id === id && !this.isSoundRunning(id)) this.sequencer.restore(null);
+    this.sequencer.enter({ id, crossfadeSeconds: 0 });
   }
 
-  /** The music that is playing, so a jump has something to jump within. */
+  private stopScored(id: number): void {
+    if (this.sequencer.state?.id === id) this.sequencer.leave();
+    else this.stopSound(id);
+  }
+
+  /**
+   * The iMUSE command layer: player commands, the marker queue, triggers.
+   *
+   * Set to Sam & Max's numbering by `configureImuse`, because the same command
+   * number means different things in the two systems.
+   */
+  readonly imuse: ImuseCommands = new ImuseCommands({
+    player: (id) => this.livePlayer(id),
+    run: (args) => this.kludge(args),
+    status: (id) => this.isSoundRunning(id),
+    stop: (id) => this.stopScored(id),
+    log: (line) => this.onLog?.(line),
+  });
+
+  /** How far a transpose may reach: 12 for Day of the Tentacle, 24 otherwise. */
+  private transposeLimit = 24;
+
+  /**
+   * Says which iMUSE a game has.
+   *
+   * Two facts about the *title* rather than the version, as ScummVM's
+   * `_newSystem` (Sam & Max) and its Day of the Tentacle transpose limit are.
+   */
+  configureImuse(options: { newSystem?: boolean; transposeLimit?: number }): void {
+    this.imuse.newSystem = options.newSystem ?? false;
+    this.transposeLimit = options.transposeLimit ?? 24;
+  }
+
+  /**
+   * Every live iMUSE player, all on one chip (`ImuseMixer`), streamed as one.
+   *
+   * One card for everything, as the original has: the nine OPL2 voices are
+   * shared by priority between the music and any sound-effect score.
+   */
+  private readonly mixer = new ImuseMixer();
+  private mixerStream: LiveMusicStream | null = null;
+  private readonly players = new Map<number, ImusePlayer>();
+
+  /** The global instrument slots, which every player's sysex 17 fills. */
+  private readonly globals = new GlobalInstruments();
+
+  /** v1-v4 speaker sounds, one at a time as `Player_V2` plays them. */
+  private readonly speakerSequence = new SpeakerSequence(OPL2_RATE);
+  private speakerStream: LiveMusicStream | null = null;
+
+  /** Saved player states waiting for their sound to start (see `restoreImuse`). */
+  private readonly pendingPlayerState = new Map<number, SavedImusePlayer>();
+
+  /** A sound's live player while it is still playing, or null. */
+  private livePlayer(id: number): ImusePlayer | null {
+    const player = this.players.get(id);
+    return player && player.active ? player : null;
+  }
+
+  /**
+   * What a sound resource can be sequenced from, parsed once per id.
+   *
+   * `false` means "nothing to sequence" — a digitised effect, or data no card
+   * here can play — so the decoded-sample path is taken instead.
+   */
+  private readonly liveCache = new Map<
+    number,
+    | { score: NonNullable<ReturnType<typeof readScummScore>>; resource: Uint8Array }
+    | { speaker: Uint8Array; headerLength: number }
+    | false
+  >();
+
+  private liveEntry(id: number) {
+    let entry = this.liveCache.get(id);
+    if (entry !== undefined) return entry;
+
+    entry = false;
+    const resource = this.resources?.getSound(id) ?? null;
+    // A resource with digitised audio in it is a sample, whatever else it
+    // carries: effects often ship a score beside their recording.
+    if (resource && !decodeSoundResource(resource)) {
+      const score = readScummScore(resource);
+      if (score && score.midi.events.length > 0) entry = { score, resource };
+      else {
+        // v3/v4 tag their speaker block `WA` and give it a six-byte header;
+        // v1/v2 do neither, and their header is four bytes.
+        const tagged = findSpeakerBlock(resource);
+        const version = this.resources?.game?.version ?? 5;
+        const old = !tagged && version <= 3 ? findOldBundleSpeaker(resource) : null;
+        if (tagged) entry = { speaker: tagged, headerLength: 6 };
+        else if (old) entry = { speaker: old, headerLength: 4 };
+      }
+    }
+    this.liveCache.set(id, entry);
+    return entry;
+  }
+
+  private createPlayer(
+    id: number,
+    entry: { score: NonNullable<ReturnType<typeof readScummScore>>; resource: Uint8Array },
+  ): ImusePlayer {
+    const port = this.mixer.portFor(entry.score.kind);
+    const player: ImusePlayer = new ImusePlayer(id, entry.score.midi, {
+      kind: entry.score.kind,
+      newSystem: this.imuse.newSystem,
+      transposeLimit: this.transposeLimit,
+      start: readStartParameters(entry.resource),
+      synth: port,
+      globals: this.globals,
+      host: {
+        marker: (sound, marker) => this.imuse.marker(sound, marker),
+        triggerEvent: (sound, marker) => this.imuse.triggerEvent(sound, marker),
+        ended: (sound) => {
+          if (this.players.get(sound) === player) this.players.delete(sound);
+          this.imuse.soundEnded(sound);
+        },
+      },
+    });
+    const channelVolume = this.imuse.channelVolumeFor(id);
+    if (channelVolume !== 127) player.setChannelVolume(channelVolume);
+    this.mixer.add(player, port);
+    return player;
+  }
+
+  /**
+   * Starts a sound as live-sequenced music, when it is a score.
+   *
+   * Imported audio keeps the rendered path: it was decoded when the project
+   * loaded, and a project track is played as the author heard it in the
+   * editor.
+   */
+  private startLive(id: number): boolean {
+    if (!this.context || !this.masterGain || this.registered.has(id)) return false;
+    const entry = this.liveEntry(id);
+    if (!entry) return false;
+
+    this.stopSound(id);
+    if ('speaker' in entry) {
+      this.speakerSequence.start({ id, data: entry.speaker, headerLength: entry.headerLength });
+      this.speakerStream = this.ensureStream(this.speakerStream, this.speakerSequence, (s) => {
+        if (this.speakerStream === s) this.speakerStream = null;
+      });
+      return true;
+    }
+
+    const player = this.createPlayer(id, entry);
+    const saved = this.pendingPlayerState.get(id);
+    if (saved) {
+      this.pendingPlayerState.delete(id);
+      player.restore(saved);
+    }
+    this.players.set(id, player);
+    this.playingMusic = id;
+    this.mixerStream = this.ensureStream(this.mixerStream, this.mixer, (s) => {
+      if (this.mixerStream === s) this.mixerStream = null;
+    });
+    return true;
+  }
+
+  /** The stream for a shared source, started if it is not already running. */
+  private ensureStream(
+    stream: LiveMusicStream | null,
+    source: ImuseMixer | SpeakerSequence,
+    finished: (stream: LiveMusicStream) => void,
+  ): LiveMusicStream {
+    if (stream && !stream.finished) {
+      stream.pump();
+      return stream;
+    }
+    const created = new LiveMusicStream(
+      this.context as AudioContext,
+      this.masterGain as GainNode,
+      source,
+    );
+    created.onFinished = () => finished(created);
+    return created;
+  }
+
+  /**
+   * The iMUSE state a save carries: every player, the command queue and
+   * triggers, and the global instruments (`IMuseInternal::saveLoadIMuse`).
+   */
+  saveImuse(): SavedImuse {
+    return {
+      players: [...this.players.values()].filter((p) => p.active).map((p) => p.save()),
+      commands: this.imuse.save(),
+      globals: this.globals.save(),
+    };
+  }
+
+  /**
+   * Puts the iMUSE state back from a save. A save written before this existed
+   * has none, and is loaded exactly as before — the music state alone.
+   *
+   * Each saved player is restarted and then laid over with its saved state;
+   * with no audio context yet that happens when the context arrives, since the
+   * state waits for its sound to start.
+   */
+  restoreImuse(saved: SavedImuse | undefined | null): void {
+    if (!saved) return;
+    for (const player of this.players.values()) {
+      this.mixer.remove(player);
+      player.halt();
+    }
+    this.players.clear();
+    this.imuse.restore(saved.commands);
+    this.globals.restore(saved.globals);
+    for (const state of saved.players) {
+      this.pendingPlayerState.set(state.id, state);
+      this.startSound(state.id);
+      if (this.livePlayer(state.id)) this.playingMusic = state.id;
+    }
+  }
+
+  /** The music that is playing, for `VAR_MUSIC_TIMER`. */
   private playingMusic: number | null = null;
 
   /**
    * The live sequencer, driving music as state rather than as a track.
    *
-   * v6 feeds it the rendered OPL2 buffers this engine already produces and v7
-   * will feed it decoded bundle streams; the transition logic above is the same
-   * for both (ADR 0008). Sound *effects* do not go through it — only music
-   * moves onto the sequencer, because only music has states to move between.
+   * v6 feeds it the live-sequenced scores this engine plays and v7 decoded
+   * bundle streams; the transition logic above is the same for both (ADR
+   * 0008). Sound *effects* do not go through it — only music moves onto the
+   * sequencer, because only music has states to move between.
    */
   readonly sequencer: MusicSequencer = new MusicSequencer(this.musicSource(), (line) =>
     this.onLog?.(line),
@@ -1312,229 +1524,6 @@ export class SoundEngine {
       setPan: (id, pan) => this.setSoundPan(id, pan),
       fadePan: (id, pan, seconds) => this.fadeSoundPan(id, pan, seconds),
     };
-  }
-
-  /**
-   * The jump hook the game has armed, or 0 for none.
-   *
-   * This is how iMUSE actually branches: the composer puts exits in the score,
-   * each waiting on a hook number, and the game chooses between them by arming
-   * one. Jumping to a beat — all this engine could do before — is the crude
-   * version of the same idea, because it makes the engine guess a musical
-   * position the composer had already marked.
-   */
-  private armedJumpHook = 0;
-
-  /** Timers for the hook jumps in the playing score. */
-  private hookTimers: Array<ReturnType<typeof setTimeout>> = [];
-
-  /**
-   * Arms a hook, and schedules the score's own jumps against it.
-   *
-   * Each jump the score carries becomes a timer for the moment it will be
-   * heard; when one fires, it is taken only if the hook it names is still the
-   * armed one. That mirrors the original's rule — a hook is consumed by the
-   * jump it triggers — so a hook armed once does not branch the music every
-   * time round the loop.
-   */
-  private armJumpHook(hook: number): void {
-    this.armedJumpHook = hook;
-    this.clearHookTimers();
-    if (hook === 0 || this.playingMusic === null) return;
-
-    const resource = this.resources?.getSound(this.playingMusic);
-    const midi = resource ? readScummMusic(resource) : null;
-    if (!midi) return;
-
-    const id = this.playingMusic;
-    for (const jump of findHookJumps(midi)) {
-      const at = ticksToSeconds(jump.tick, midi) * 1000;
-      this.hookTimers.push(
-        setTimeout(
-          () => {
-            if (this.armedJumpHook !== jump.hook) return;
-            this.armedJumpHook = 0;
-            this.restartMusicAt(id, jump.beat, jump.tickInBeat);
-          },
-          Math.max(0, at),
-        ),
-      );
-    }
-  }
-
-  private clearHookTimers(): void {
-    for (const timer of this.hookTimers) clearTimeout(timer);
-    this.hookTimers = [];
-  }
-
-  /**
-   * Commands waiting on a marker, and the timers that will run them.
-   *
-   * A marker is a point in the score, and this engine plays a rendered buffer
-   * rather than sequencing, so "when the music reaches the marker" becomes a
-   * timer set for when that point will be heard. Scheduling beats polling here:
-   * the tick-to-seconds conversion is done once, at the moment the trigger is
-   * armed, rather than every frame.
-   */
-  private readonly triggers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  private triggerKey(sound: number, marker: number): string {
-    return `${sound}:${marker}`;
-  }
-
-  /** Arms a command to run when the playing score reaches a marker. */
-  private setTrigger(sound: number, marker: number, command: number[]): void {
-    this.clearTrigger(sound, marker);
-
-    const resource = this.resources?.getSound(sound);
-    const midi = resource ? readScummMusic(resource) : null;
-    const found = midi ? findMarkers(midi).find((candidate) => candidate.id === marker) : undefined;
-    // A trigger that cannot be placed is dropped, and said out loud. Arming a
-    // timer whose moment is a guess is worse than not arming one: the command
-    // would fire at an arbitrary point in the music rather than not at all,
-    // and a musical event in the wrong place reads as a bug in the game.
-    if (!midi || !found) {
-      this.onLog?.(
-        `A music trigger on marker ${marker} was dropped: sound ${sound} ` +
-          `${midi ? 'does not carry that marker' : 'has no score to hang it on'}`,
-      );
-      return;
-    }
-
-    const at = ticksToSeconds(found.tick, midi) * 1000;
-    const key = this.triggerKey(sound, marker);
-    this.triggers.set(
-      key,
-      setTimeout(
-        () => {
-          this.triggers.delete(key);
-          // Back through the same door the game would have used.
-          this.kludge(command);
-        },
-        Math.max(0, at),
-      ),
-    );
-  }
-
-  private clearTrigger(sound: number, marker: number): void {
-    const key = this.triggerKey(sound, marker);
-    const timer = this.triggers.get(key);
-    if (timer !== undefined) clearTimeout(timer);
-    this.triggers.delete(key);
-  }
-
-  /** Drops every armed trigger, for a scene that has moved on. */
-  private clearAllTriggers(): void {
-    for (const timer of this.triggers.values()) clearTimeout(timer);
-    this.triggers.clear();
-  }
-
-  /**
-   * Re-renders the playing score from a new position and plays that.
-   *
-   * Silent when the sound is not a score this engine can render — a digitised
-   * effect, or a piece that only ever had a Roland version — because there is
-   * nothing to jump within, and stopping the music would be a worse answer than
-   * letting it run.
-   */
-  private restartMusicAt(id: number, beat: number, tickInBeat: number): void {
-    if (!this.resources || !this.context) return;
-
-    const resource = this.resources.getSound(id);
-    if (!resource) return;
-
-    const midi = readScummMusic(resource);
-    if (!midi) return;
-
-    // Seek within the audio already playing, where that is possible. This is
-    // the whole of ADR 0008's "live sequencer" in practice: a jump moves the
-    // playing position rather than re-rendering the score from the target,
-    // which is what let the position-dependent commands be served at the moment
-    // they arrive instead of after a pause the player can hear.
-    //
-    // Falls back to rendering when the target lies outside what was rendered —
-    // a score longer than the render cap has nothing there to seek to.
-    const targetSeconds = ticksToSeconds(jumpTargetTick(midi.division, beat, tickInBeat), midi);
-    if (this.seekTo(id, targetSeconds)) return;
-
-    const rendered = renderScummMusic(
-      resource,
-      this.context.sampleRate,
-      jumpTargetTick(midi.division, beat, tickInBeat),
-    );
-    if (!rendered) return;
-
-    const buffer = this.context.createBuffer(1, rendered.samples.length, rendered.sampleRate);
-    buffer.getChannelData(0).set(rendered.samples);
-
-    this.stopSound(id);
-    this.decoded.set(id, buffer);
-    this.startSound(id);
-  }
-
-  /**
-   * Loops a section of the playing score.
-   *
-   * The buffer already holds the whole rendering, so this needs no re-render:
-   * a `AudioBufferSourceNode` loops natively between two points in seconds, and
-   * ticks convert to seconds through the score's own tempo. That makes looping
-   * the one iMUSE command this engine serves *without* a seam.
-   *
-   * A count of zero means "for ever", which is what a background piece under a
-   * scene asks for. Any other count is honoured by letting the loop run and
-   * stopping it after the right span, since a buffer source cannot be told to
-   * repeat a fixed number of times.
-   */
-  private loopMusicBetween(
-    id: number,
-    startBeat: number,
-    startTick: number,
-    endBeat: number,
-    endTick: number,
-  ): void {
-    const source = this.playing.get(id);
-    const buffer = source?.buffer;
-    if (!source || !buffer || !this.context) return;
-
-    const resource = this.resources?.getSound(id);
-    const midi = resource ? readScummMusic(resource) : null;
-    if (!midi) return;
-
-    const seconds = (beat: number, tick: number) =>
-      ticksToSeconds(jumpTargetTick(midi.division, beat, tick), midi);
-
-    const from = seconds(startBeat, startTick);
-    const to = seconds(endBeat, endTick);
-    // An end at or before the start is a script bug, and looping a zero-length
-    // region would spin the audio thread rather than play anything.
-    if (!(to > from) || from >= buffer.duration) return;
-
-    source.loopStart = from;
-    source.loopEnd = Math.min(to, buffer.duration);
-    source.loop = true;
-  }
-
-  /**
-   * Ramps the volume toward a target, rather than stepping to it.
-   *
-   * The command asks for a fade because a step is audible as a click, so doing
-   * it instantly would technically obey and still sound wrong. Time is in the
-   * command's own units, which are sixtieths of a second.
-   */
-  private fadeVolume(target: number, time: number): void {
-    if (!this.context || !this.masterGain) return;
-
-    const level = Math.max(0, Math.min(1, target / 127));
-    const seconds = Math.max(0, time / 60);
-    const now = this.context.currentTime;
-
-    this.masterGain.gain.cancelScheduledValues(now);
-    this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
-    if (seconds === 0) this.masterGain.gain.setValueAtTime(level, now);
-    else this.masterGain.gain.linearRampToValueAtTime(level, now + seconds);
-
-    // So a later `setVolume` does not undo the fade by writing the old value.
-    this.volume = level;
   }
 
   /** Said once per distinct command: a game polls, and a log that repeats buries itself. */

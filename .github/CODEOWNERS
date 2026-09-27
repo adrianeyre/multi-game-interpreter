@@ -52,22 +52,3 @@
 # subdirectory, as its owners are left empty.
 # /apps/ @octocat
 # /apps/github
-
-# Dependency manifest files — no code owner (blank entry overrides the catch-all above).
-# GitHub: "if the last matching pattern has no owner, changes to those files do not
-# require code-owner review." This makes require_code_owner_review vacuously satisfied
-# for Dependabot PRs, so the github-actions[bot] approval in dependabot-automerge.yml
-# only needs to satisfy required_approving_review_count:1 (ADR-0042 §2 Lane 1).
-# Pattern covers all workspace manifests: root, apps/*, packages/*, plugins/*, skills/*.
-**/package.json
-**/pnpm-lock.yaml
-
-# GitHub-Actions Dependabot bumps edit the `uses:` refs INSIDE workflow files, not a
-# separate manifest — so the blank override has to cover the workflow files themselves,
-# or a github_actions Lane-1 PR (issue #954, Track D → Lane 1) still matches the
-# catch-all `* @Percayso-Community/community-engineers` and the github-actions[bot] approval cannot satisfy
-# required code-owner review (Phase-2 `gh pr merge` would then be rejected by branch
-# protection). This mirrors the npm-manifest exemption above: it drops only the
-# *code-owner* review requirement; branch protection's required_approving_review_count:1
-# still holds (satisfied by the bot for Dependabot PRs, by a reviewer for human PRs).
-/.github/workflows/

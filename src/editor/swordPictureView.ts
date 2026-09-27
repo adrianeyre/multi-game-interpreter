@@ -39,6 +39,21 @@
  * The colours are the frame's own — an RLE16 frame offers the sixteen its
  * resource carries and no others — and colour 0 is the eraser, because this
  * family's transparency is index 0.
+ *
+ * ## Borrowed by SCI, which is why three things are options
+ *
+ * Sierra's View cels and cel Pictures are painted through this same panel
+ * (`docs/editor-parity.md` rows 10 and 19), and a SCI cel differs from a Sword
+ * frame in exactly three ways the widget has to be told about rather than
+ * guess. **Its transparent index is its own** — the cel's clear key, often 255
+ * and never assumed — so `transparentIndex` says which index the eraser writes
+ * and the checkerboard shows through. **Its writer can refuse** — a V56 cel is
+ * patched in place and a body that re-encodes longer than the one it replaces
+ * does not fit — so `onPaint` may return a sentence, and the stroke is then
+ * taken back off the canvas and the sentence said, rather than left on screen
+ * as though it had been kept. **It can be 640 by 480**, where a frame drawn at
+ * its true size is a frame nobody can aim a pixel at, so `zoomable` adds a
+ * zoom the arrow-key cursor scrolls with.
  */
 
 import { announce } from '../ui/a11y.js';
@@ -72,16 +87,19 @@ export function swordImportPixels(
     transparentZero?: boolean;
     /** Which palette indices may be used. Defaults to 1..255. */
     allowed?: readonly number[];
+    /** The index a transparent pixel becomes. Broken Sword's is 0. */
+    transparentIndex?: number;
   } = {},
 ): Uint8Array {
   const transparent = options.transparentZero ?? true;
+  const clear = options.transparentIndex ?? 0;
   // Colours 1..255 by default. Dropping entry 0 is what keeps a quantised pixel
   // off the transparent index; mapping back through `allowed` is its other
   // half, and is also what lets an RLE16 frame be quantised against the sixteen
   // colours its own resource carries rather than against the whole screen.
-  const allowed = (options.allowed ?? Array.from({ length: 255 }, (_, at) => at + 1)).filter(
-    (index) => index !== 0,
-  );
+  const allowed = (
+    options.allowed ?? Array.from({ length: 256 }, (_, at) => at).filter((at) => at !== clear)
+  ).filter((index) => index !== clear);
   const indexed = quantise(source, {
     palette: allowed.map((index) => [...(palette[index] ?? [0, 0, 0])]),
     dither: options.dither ?? true,
@@ -90,7 +108,7 @@ export function swordImportPixels(
   const out = new Uint8Array(source.width * source.height);
   for (let at = 0; at < out.length; at++) {
     const index = indexed.pixels[at] ?? 0;
-    out[at] = index === TRANSPARENT_INDEX ? 0 : (allowed[index] ?? 0);
+    out[at] = index === TRANSPARENT_INDEX ? clear : (allowed[index] ?? clear);
   }
   return out;
 }
@@ -113,26 +131,35 @@ export interface SwordBrushSwatch {
  */
 export function swordBrushSwatches(
   palette: readonly number[][],
-  options: { allowed?: readonly number[]; transparentZero?: boolean } = {},
+  options: {
+    allowed?: readonly number[];
+    transparentZero?: boolean;
+    /** Which index is the transparent one. Broken Sword's is 0. */
+    transparentIndex?: number;
+  } = {},
 ): SwordBrushSwatch[] {
   const transparent = options.transparentZero ?? true;
+  const clear = options.transparentIndex ?? 0;
   const indices = options.allowed
     ? [...options.allowed]
     : Array.from({ length: 256 }, (_, at) => at);
   const swatches: SwordBrushSwatch[] = [];
   for (const index of indices) {
-    if (index === 0 && !transparent) continue;
+    if (index === clear && !transparent) continue;
     const entry = palette[index] ?? [0, 0, 0];
     const rgb: readonly [number, number, number] = [entry[0] ?? 0, entry[1] ?? 0, entry[2] ?? 0];
     swatches.push({
       index,
       rgb,
       label:
-        index === 0
-          ? 'colour 0 — transparent, the eraser'
+        index === clear && transparent
+          ? `colour ${index} — transparent, the eraser`
           : `colour ${index} — red ${rgb[0]}, green ${rgb[1]}, blue ${rgb[2]}`,
     });
   }
+  // The eraser leads, wherever its index falls in the palette.
+  const eraser = swatches.findIndex((swatch) => swatch.index === clear && transparent);
+  if (eraser > 0) swatches.unshift(...swatches.splice(eraser, 1));
   return swatches;
 }
 
@@ -167,10 +194,11 @@ export function describeSwordPixel(
   x: number,
   y: number,
   transparentZero = true,
+  transparentIndex = 0,
 ): string {
   if (x < 0 || y < 0 || x >= width || y >= height) return `${x}, ${y} — outside the frame`;
   const value = pixels[y * width + x] ?? 0;
-  if (value === 0 && transparentZero) return `${x}, ${y} — transparent`;
+  if (value === transparentIndex && transparentZero) return `${x}, ${y} — transparent`;
   return `${x}, ${y} — colour ${value}`;
 }
 
@@ -207,6 +235,11 @@ export interface SwordPictureViewOptions {
   readonly allowed?: readonly number[];
   /** False for a background, which has no transparent pixel to preserve. */
   readonly transparentZero?: boolean;
+  /**
+   * Which index is transparent when `transparentZero` holds. 0 by default,
+   * which is Broken Sword's; a SCI cel passes its own clear key.
+   */
+  readonly transparentIndex?: number;
   /** Why replacing is impossible, in a sentence naming the format. Null if it is. */
   readonly refusal: string | null;
   /** What a saved file is called. */
@@ -220,12 +253,28 @@ export interface SwordPictureViewOptions {
    * from it: a re-render rebuilds this canvas, and a canvas rebuilt after every
    * keystroke is a canvas a keyboard loses focus in on the first one.
    */
-  readonly onPaint?: (pixels: Uint8Array, width: number, height: number) => void;
+  readonly onPaint?: (pixels: Uint8Array, width: number, height: number) => string | void;
   /** The colour the brush is holding, and where to put the author's choice. */
   readonly colour?: number;
   readonly onColour?: (index: number) => void;
   /** Sentences about the format that stand whether or not it can be written. */
   readonly notes?: readonly string[];
+  /**
+   * Adds Zoom in and Zoom out, and the plus and minus keys on the canvas.
+   * Off by default: a Sword frame is small enough to draw at its true size.
+   */
+  readonly zoomable?: boolean;
+  /** The zoom to open at, when `zoomable`; the widget picks one otherwise. */
+  readonly zoom?: number;
+  readonly onZoom?: (zoom: number) => void;
+  /**
+   * Where the keyboard cursor starts, and where to tell a caller it went — so
+   * a surface that rebuilds after every committed stroke can put it back.
+   */
+  readonly cursor?: { readonly x: number; readonly y: number };
+  readonly onCursor?: (x: number, y: number) => void;
+  /** False to leave out the Export and Import row, for a caller with its own. */
+  readonly buttons?: boolean;
   /**
    * The ways a script in this project plays these frames. Empty means none do.
    *
@@ -296,11 +345,15 @@ export function swordPictureView(options: SwordPictureViewOptions): HTMLElement 
   // `redraw` is set only once a canvas accepted the brush, so a browser with
   // no 2D context gets the note and no colours to pick with nothing to paint.
   if (brush?.redraw) {
+    if (options.zoomable && surface.canvas) {
+      figure.classList.add('sword-picture-zoomable');
+      panel.appendChild(zoomControls(options, surface.canvas, brush));
+    }
     panel.appendChild(brush.help);
     panel.appendChild(swatchStrip(options, brush));
   }
 
-  panel.appendChild(buttons(options, status));
+  if (options.buttons ?? true) panel.appendChild(buttons(options, status));
   const playback = playbackControls(options, surface, status);
   if (playback) panel.appendChild(playback);
 
@@ -357,45 +410,141 @@ interface SwordBrush {
   readonly height: number;
   /** The stroke in progress: the frame's own pixels, copied. */
   readonly pixels: Uint8Array;
+  /** What the last accepted write held, for taking back a refused stroke. */
+  readonly committed: Uint8Array;
   readonly swatches: readonly SwordBrushSwatch[];
+  /** The index the eraser writes and the canvas shows as a hole. */
+  readonly clear: number;
   colour: number;
   readonly help: HTMLElement;
   /** Set by `pictureCanvas` once there is a canvas to repaint. */
   redraw: (() => void) | null;
   /** Set by `swatchStrip`, so the eyedropper can move the strip's selection. */
   showColour: ((index: number) => void) | null;
+  /** Set by `zoomControls`, so the plus and minus keys reach it. */
+  zoomBy: ((step: number) => void) | null;
   readonly say: (message: string) => void;
-  readonly commit: () => void;
+  /** Writes the stroke back; false when the writer refused it. */
+  readonly commit: () => boolean;
 }
 
 function brushOf(options: SwordPictureViewOptions, status: HTMLElement): SwordBrush | null {
   const source = options.pixels?.pixels;
   if (!source || !options.onPaint || options.refusal) return null;
   const { width, height } = options.pixels!;
+  const clear = options.transparentIndex ?? 0;
   const swatches = swordBrushSwatches(options.palette, {
     allowed: options.allowed,
     transparentZero: options.transparentZero,
+    transparentIndex: clear,
   });
   const pixels = Uint8Array.from(source);
-  const chosen = options.colour ?? swatches.find((swatch) => swatch.index !== 0)?.index ?? 0;
+  const committed = Uint8Array.from(source);
+  const chosen =
+    options.colour ?? swatches.find((swatch) => swatch.index !== clear)?.index ?? clear;
   const say = (message: string): void => {
     status.textContent = message;
   };
-  return {
+  const brush: SwordBrush = {
     width,
     height,
     pixels,
+    committed,
     swatches,
+    clear,
     colour: swatches.some((swatch) => swatch.index === chosen) ? chosen : (swatches[0]?.index ?? 0),
     help: document.createElement('div'),
     redraw: null,
     showColour: null,
+    zoomBy: null,
     say,
     // One write per stroke: `onPaint` re-encodes the frame, and a re-encode per
     // pixel of a drag across a 784-pixel background is a surface nobody can
     // draw on.
-    commit: () => options.onPaint?.(Uint8Array.from(pixels), width, height),
+    commit: () => {
+      const refused = options.onPaint?.(Uint8Array.from(pixels), width, height);
+      if (typeof refused === 'string') {
+        // Taken back off the canvas: a stroke left on screen after its writer
+        // refused it is a picture that says it holds pixels it does not.
+        pixels.set(committed);
+        brush.redraw?.();
+        say(refused);
+        announce(refused);
+        return false;
+      }
+      committed.set(pixels);
+      return true;
+    },
   };
+  return brush;
+}
+
+/** The zooms offered, each a whole number of screen pixels per image pixel. */
+const ZOOMS = [1, 2, 3, 4, 6, 8, 12, 16];
+
+/**
+ * Where a picture opens: the largest zoom at which it is still no wider than a
+ * 640-pixel screen, so a 30-pixel cel is big enough to aim at and a 640 by 480
+ * background opens at its true size.
+ */
+export function swordDefaultZoom(width: number): number {
+  let chosen = 1;
+  for (const zoom of ZOOMS) if (width * zoom <= 640) chosen = zoom;
+  return chosen;
+}
+
+/**
+ * Zoom in and Zoom out, for a picture too large or too small to paint at its
+ * true size.
+ *
+ * Scaled by CSS rather than by redrawing at a larger size: the canvas keeps one
+ * pixel per image pixel, `image-rendering: pixelated` keeps the edges hard, and
+ * the pointer's position is already measured against the drawn box rather than
+ * assumed, so a stroke lands on the pixel under it at any zoom. Buttons, so
+ * they are operable by being buttons; the plus and minus keys do the same from
+ * the canvas.
+ */
+function zoomControls(
+  options: SwordPictureViewOptions,
+  canvas: HTMLCanvasElement,
+  brush: SwordBrush,
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'sword-picture-buttons sword-zoom';
+  let zoom = ZOOMS.includes(options.zoom ?? 0) ? options.zoom! : swordDefaultZoom(brush.width);
+
+  const out = document.createElement('button');
+  out.type = 'button';
+  out.textContent = 'Zoom out';
+  const into = document.createElement('button');
+  into.type = 'button';
+  into.textContent = 'Zoom in';
+  const level = document.createElement('span');
+  level.className = 'sword-note';
+
+  const apply = (): void => {
+    canvas.style.width = `${canvas.width * zoom}px`;
+    canvas.style.height = `${canvas.height * zoom}px`;
+    level.textContent = `${zoom}×`;
+    out.disabled = zoom === ZOOMS[0];
+    into.disabled = zoom === ZOOMS[ZOOMS.length - 1];
+  };
+  brush.zoomBy = (step) => {
+    const at = ZOOMS.indexOf(zoom);
+    const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, at + step))];
+    if (next === zoom) return;
+    zoom = next;
+    apply();
+    options.onZoom?.(zoom);
+    brush.say(`Zoom ${zoom} to 1.`);
+  };
+  out.addEventListener('click', () => brush.zoomBy?.(-1));
+  into.addEventListener('click', () => brush.zoomBy?.(1));
+  out.setAttribute('aria-label', `zoom out of ${options.title}`);
+  into.setAttribute('aria-label', `zoom into ${options.title}`);
+  apply();
+  row.append(out, into, level);
+  return row;
 }
 
 /** The frame's own colours, as a radio group the arrow keys move through. */
@@ -438,6 +587,8 @@ function swatchStrip(options: SwordPictureViewOptions, brush: SwordBrush): HTMLE
 /** Where the play loop finds the canvas the frame was drawn on, if there is one. */
 interface PictureSurface {
   draw?: (image: RenderedImage) => void;
+  /** The canvas itself, for the zoom controls. */
+  canvas?: HTMLCanvasElement;
 }
 
 function pictureCanvas(
@@ -493,6 +644,7 @@ function pictureCanvas(
     }
     put(image);
   };
+  surface.canvas = canvas;
   if (brush) attachBrush(canvas, context, options, brush);
   return canvas;
 }
@@ -615,22 +767,29 @@ function attachBrush(
   brush: SwordBrush,
 ): void {
   const transparent = options.transparentZero ?? true;
+  const clear = brush.clear;
   const cursor = new KeyboardCursor();
+  if (options.cursor) {
+    cursor.x = options.cursor.x;
+    cursor.y = options.cursor.y;
+    cursor.clamp({ width: brush.width, height: brush.height });
+  }
   const help = describeCanvas(canvas, {
     id: `${options.id}-brush-help`,
     label: `${options.title}, ${brush.width} by ${brush.height} pixels, paintable`,
     help:
       'Paint this frame. Arrow keys move the drawing cursor one pixel, with Shift for eight. ' +
       'Enter or Space paints the selected colour, Delete erases to transparent, and P picks up ' +
-      'the colour under the cursor. Home, End, Page Up and Page Down go to the edges. The ' +
-      'colours below are the ones this frame can hold.',
+      'the colour under the cursor. Home, End, Page Up and Page Down go to the edges. ' +
+      (options.zoomable ? 'Plus and minus zoom in and out. ' : '') +
+      'The colours below are the ones this frame can hold.',
   });
   // `brush.help` is a wrapper the panel has already placed; `describeCanvas`
   // points the canvas's aria-describedby at what goes inside it.
   brush.help.appendChild(help);
 
   const rgba = (index: number): readonly [number, number, number, number] => {
-    if (index === 0 && transparent) return [0, 0, 0, 0];
+    if (index === clear && transparent) return [0, 0, 0, 0];
     const entry = options.palette[index] ?? [0, 0, 0];
     return [entry[0] ?? 0, entry[1] ?? 0, entry[2] ?? 0, 255];
   };
@@ -657,6 +816,27 @@ function attachBrush(
     if (cursor.visible) drawCursor(context, cursor.x, cursor.y, 1, 1);
   };
   brush.redraw = redraw;
+
+  /**
+   * Scrolls the zoomed picture so the keyboard cursor stays in view. A cursor
+   * that walks off the visible part of a 640-pixel background at four times
+   * is a cursor the author has to find with the scrollbars.
+   */
+  const reveal = (): void => {
+    const frame = canvas.parentElement;
+    if (!frame || canvas.width === 0 || canvas.clientWidth === 0) return;
+    const scale = canvas.clientWidth / canvas.width;
+    const x = cursor.x * scale;
+    const y = cursor.y * scale;
+    if (x < frame.scrollLeft) frame.scrollLeft = x;
+    else if (x + scale > frame.scrollLeft + frame.clientWidth) {
+      frame.scrollLeft = x + scale - frame.clientWidth;
+    }
+    if (y < frame.scrollTop) frame.scrollTop = y;
+    else if (y + scale > frame.scrollTop + frame.clientHeight) {
+      frame.scrollTop = y + scale - frame.clientHeight;
+    }
+  };
 
   const pointerPixel = (event: PointerEvent): { x: number; y: number } => {
     const box = canvas.getBoundingClientRect();
@@ -686,7 +866,7 @@ function attachBrush(
     event.preventDefault();
     painting = true;
     // The right button erases, which is that same convention.
-    const colour = event.button === 2 ? 0 : brush.colour;
+    const colour = event.button === 2 ? clear : brush.colour;
     touched = paintOne(x, y, colour);
     cursor.x = x;
     cursor.y = y;
@@ -696,7 +876,7 @@ function attachBrush(
   canvas.addEventListener('pointermove', (event) => {
     if (!painting) return;
     const { x, y } = pointerPixel(event);
-    if (paintOne(x, y, event.buttons === 2 ? 0 : brush.colour)) touched = true;
+    if (paintOne(x, y, event.buttons === 2 ? clear : brush.colour)) touched = true;
   });
 
   const stop = (): void => {
@@ -704,7 +884,7 @@ function attachBrush(
     painting = false;
     if (!touched) return;
     touched = false;
-    brush.commit();
+    if (!brush.commit()) return;
     brush.say(`Painted ${options.title}.`);
     announce('Painted.');
   };
@@ -728,6 +908,8 @@ function attachBrush(
     if (cursor.handle(event, bounds)) {
       event.preventDefault();
       redraw();
+      reveal();
+      options.onCursor?.(cursor.x, cursor.y);
       brush.say(
         describeSwordPixel(
           brush.pixels,
@@ -736,20 +918,30 @@ function attachBrush(
           cursor.x,
           cursor.y,
           transparent,
+          clear,
         ),
       );
       return;
     }
 
+    if (brush.zoomBy && (event.key === '+' || event.key === '=' || event.key === '-')) {
+      event.preventDefault();
+      brush.zoomBy(event.key === '-' ? -1 : 1);
+      reveal();
+      return;
+    }
+
     if (isActivation(event) || isErase(event)) {
       event.preventDefault();
-      const colour = isErase(event) ? 0 : brush.colour;
-      if (colour === 0 && !transparent) {
-        brush.say('This frame has no transparent colour to erase to: its palette has no index 0.');
+      const colour = isErase(event) ? clear : brush.colour;
+      if (isErase(event) && !transparent) {
+        brush.say(
+          `This frame has no transparent colour to erase to: its palette has no index ${clear}.`,
+        );
         return;
       }
       // One write per press, which is also one undo step per press.
-      if (paintOne(cursor.x, cursor.y, colour)) brush.commit();
+      if (paintOne(cursor.x, cursor.y, colour) && !brush.commit()) return;
       redraw();
       brush.say(
         isErase(event)

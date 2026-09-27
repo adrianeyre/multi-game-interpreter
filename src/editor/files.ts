@@ -25,6 +25,16 @@ export interface DirectoryHandleLike {
    * `pickReadableFolder` adapts into this.
    */
   listNames?(): Promise<string[]>;
+  /**
+   * A folder inside this one, made if asked for.
+   *
+   * Optional for the reason `listNames` is. The real handle has it, and Save
+   * needs it for exactly one thing: the `audio/` folder that carries the tracks
+   * too large to live inside the project JSON. A handle without it cannot hold
+   * a nested path, and {@link writeInto} says so rather than writing a file
+   * whose name has a slash in it.
+   */
+  getDirectoryHandle?(name: string, options?: { create?: boolean }): Promise<DirectoryHandleLike>;
   queryPermission?(descriptor: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
   requestPermission?(descriptor: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
 }
@@ -174,12 +184,28 @@ export async function ensureWritable(handle: DirectoryHandleLike): Promise<boole
   return requested === 'granted';
 }
 
+/**
+ * Writes one file into a folder, making any folders its path names.
+ *
+ * A path rather than a name, because Save writes `audio/<key>` beside the
+ * project JSON and the File System Access API refuses a file name with a slash
+ * in it. Each segment but the last is a folder, opened or made in turn.
+ */
 export async function writeInto(
   folder: DirectoryHandleLike,
   name: string,
   data: Uint8Array | string,
 ): Promise<void> {
-  const file = await folder.getFileHandle(name, { create: true });
+  const segments = name.split('/').filter((segment) => segment.length > 0);
+  const leaf = segments.pop() ?? name;
+  let parent = folder;
+  for (const segment of segments) {
+    if (!parent.getDirectoryHandle) {
+      throw new Error(`${folder.name} cannot hold the folder ${segment}/ that ${name} needs`);
+    }
+    parent = await parent.getDirectoryHandle(segment, { create: true });
+  }
+  const file = await parent.getFileHandle(leaf, { create: true });
   const writable = await file.createWritable();
   // Wrapping in a Blob sidesteps the typed-array/ArrayBuffer variance dance and
   // is what the API accepts everywhere it exists.

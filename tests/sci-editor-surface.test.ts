@@ -599,6 +599,21 @@ describe('Views, fonts, cursors and vocabularies have surfaces of their own', ()
   });
 
   /**
+   * Palettes have a section of their own, so they are not also counted as
+   * carried through — that note says "no surface of their own", and listing
+   * one resource under both headings made the note untrue.
+   */
+  it('lists a palette under Palettes and not under Carried through', () => {
+    const project = sciProject();
+    project.sci!.resources.push({ type: 'palette', number: 999, bytes: '' });
+    const { editor, text } = mount(project);
+    expect(sectionCount(editor.element, 'Palettes')).toBe('1');
+    openAllSections(editor.element);
+    expect(text()).toMatch(/1 sound, 1 vocab/);
+    expect(text()).not.toMatch(/\d+ palette\b/);
+  });
+
+  /**
    * A cel's origin is where it sits relative to the actor's feet, and getting
    * it wrong stands every actor half a cel to one side — which reads as art
    * that does not line up rather than as a fault. Two signed bytes, and worth
@@ -929,16 +944,16 @@ describe('the Audio section', () => {
     expect(detail.textContent).toMatch(/Music is not here/);
   });
 
-  it('says a replacement does not reach the exported install, before one is made', () => {
-    // The rows offer Replace because the shared section does, and a SCI export
-    // carries `RESOURCE.AUD` through byte for byte (#227). Saying so on the
-    // panel is the difference between a documented limit and a button that
-    // looks like it changed the game.
+  it('says what a replacement does to the exported install, before one is made', () => {
+    // A replaced recording is written into the audio Volume and its base-map
+    // entry repointed (#227, `sciAudioVolume.ts`); the panel says so, and says
+    // what is refused, before the button is pressed.
     const project = withAudio();
     const detail = openAudio(project, section(project)).element.querySelector(
       '.sci-resource-detail',
     )!;
-    expect(detail.textContent).toMatch(/does not change the exported install/);
+    expect(detail.textContent).toMatch(/what an export writes/);
+    expect(detail.textContent).toMatch(/has to be a PCM WAV/);
   });
 
   it('mounts without a section at all, and says so instead of showing an empty pane', () => {
@@ -1416,10 +1431,9 @@ describe('a PNG comes back in where this project has an encoder for it', () => {
   });
 
   /**
-   * And not on a V56 View, which is the half of the row that is still a No.
-   * `writeSciView` patches a V56 cel's origin in place and never re-encodes its
-   * body, so a button there would write a cel back unencoded — worse than the
-   * No it replaced.
+   * A V56 View's own sentence still says its artwork is not re-encoded by
+   * `writeSciView`; an import is the exception, patched in place by
+   * `patchSciV56CelPixels` when it fits (tests/sci-v56-import.test.ts).
    *
    * Held against `describeSciViewInPlace` rather than against a rendered pane,
    * because that sentence **is** the condition the button is behind, and the

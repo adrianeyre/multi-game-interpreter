@@ -6,6 +6,7 @@ import {
   definedFacings,
   poseCels,
   type PoseFacing,
+  type Project,
   type ProjectActor,
   type SpriteCel,
 } from '../authoring/project.js';
@@ -107,6 +108,17 @@ export class SpriteCanvas {
    * looking at its first character — on a facing nothing is drawn under.
    */
   private currentActor = 0;
+  /**
+   * The project `currentActor` was chosen in.
+   *
+   * An id alone cannot tell a new project's actor 1 from the old one's. The
+   * editor selects actor 1 of whatever it opened on, and an imported game
+   * arrives from IndexedDB a moment later with an actor 1 of its own — so the
+   * id did not change, `showADrawnFacing` never ran, and every imported
+   * character opened on an empty `all` facing: a blank 16x24 canvas where the
+   * player's artwork should have been.
+   */
+  private actorProject: Project | null = null;
 
   /** Which pose (SCUMM frame number) is being edited. */
   get frameIndex(): number {
@@ -125,8 +137,9 @@ export class SpriteCanvas {
   }
 
   set actorId(id: number) {
-    if (id === this.currentActor) return;
+    if (id === this.currentActor && this.state.current === this.actorProject) return;
     this.currentActor = id;
+    this.actorProject = this.state.current;
     this.showADrawnFacing();
   }
 

@@ -41,14 +41,38 @@ export interface SciAudioEntry {
 /**
  * Reads the base audio map, numbered 65535.
  *
- * Six bytes an entry: a 16-bit resource number and a 32-bit offset. Verified
- * against Freddy Pharkas's demo, whose offsets rise monotonically from zero and
- * stay inside its `RESOURCE.AUD` — which is the check worth making, because a
- * table read at the wrong width still produces numbers and they are still in
- * range for the first few entries.
+ * Two forms, and which one is ScummVM's `readAudioMapSCI11` rule rather than a
+ * guess made here:
+ *
+ * - **Six bytes an entry** — a 16-bit resource number and a 32-bit offset —
+ *   which is what a SCI1.1 talkie ships. Verified against Freddy Pharkas's
+ *   demo, whose offsets rise monotonically from zero and stay inside its
+ *   `RESOURCE.AUD` — which is the check worth making, because a table read at
+ *   the wrong width still produces numbers and they are still in range for the
+ *   first few entries.
+ * - **Five bytes an entry**, a 16-bit number and a 24-bit *step* from the
+ *   previous entry's offset, so the offsets are cumulative. SCI2 and later use
+ *   it without exception — ScummVM skips its width heuristic for SCI32 and
+ *   fixes the entry size — so `sci32` selects it. Read at six bytes, one of
+ *   these maps names numbers that are half an offset each.
+ *
+ * Both end at a number of `0xffff`.
  */
-export function readSciAudioMap(resource: Uint8Array): SciAudioEntry[] {
+export function readSciAudioMap(
+  resource: Uint8Array,
+  options: { sci32?: boolean } = {},
+): SciAudioEntry[] {
   const entries: SciAudioEntry[] = [];
+  if (options.sci32) {
+    let offset = 0;
+    for (let at = 0; at + 5 <= resource.length; at += 5) {
+      const number = resource[at] | (resource[at + 1] << 8);
+      if (number === 0xffff) break;
+      offset += resource[at + 2] | (resource[at + 3] << 8) | (resource[at + 4] << 16);
+      entries.push({ number, offset, volume: 'aud' });
+    }
+    return entries;
+  }
   for (let at = 0; at + 6 <= resource.length; at += 6) {
     const number = resource[at] | (resource[at + 1] << 8);
     if (number === 0xffff) break;
@@ -239,4 +263,71 @@ export async function readSciAudioSample(
 
   const body = await volumes.read(file, offset + header.dataOffset, header.length);
   return { header, body };
+}
+
+/**
+ * Which file one disc's audio map addresses, on a numbered-disc install.
+ *
+ * ScummVM's `readResourceMapSCI1` under `_multiDiscAudio` (`RESSCI.001`
+ * present, `RESOURCE.AUD` absent): each disc's audio maps are read as that
+ * disc reads them, before the next disc's maps of the same number replace
+ * them. Map 65535 on disc n addresses `RESSFX.00n` and every other map
+ * `RESAUD.00n`. Where a disc ships no `RESSFX.00n` the base map is read out
+ * of `RESAUD.00n` — ScummVM falls back by name for RAMA, whose base map is
+ * not always beside an `RESSFX` of its own number, and the fallback here is
+ * the same idea applied to the Volume that disc does have.
+ *
+ * Null when the disc has no audio Volume at all.
+ */
+export function sciDiscAudioVolume(
+  files: ReadonlyMap<string, string>,
+  mapNumber: number,
+  disc: number,
+): string | null {
+  const n = String(disc).padStart(3, '0');
+  if (mapNumber === SCI_BASE_AUDIO_MAP) {
+    return files.get(`RESSFX.${n}`) ?? files.get(`RESAUD.${n}`) ?? null;
+  }
+  return files.get(`RESAUD.${n}`) ?? null;
+}
+
+/** The part of the resource layer a numbered-disc audio lookup needs. */
+export interface SciDiscAudioResources {
+  readonly discs: number[];
+  readOnDisc(type: 'map', number: number, disc: number): Promise<Uint8Array | null>;
+  readonly isSci32: boolean;
+  readonly layout: { readonly discAudioFiles: ReadonlyMap<string, string> };
+}
+
+/** Where one base-map recording is on a numbered-disc install. */
+export interface SciDiscRecording {
+  readonly disc: number;
+  readonly file: string;
+  readonly offset: number;
+}
+
+/**
+ * The disc a base-map recording is played from, and where in its Volume.
+ *
+ * **The lowest disc that lists it wins.** ScummVM's `addResource` adds an
+ * audio resource only when it is not already known, and the discs are read in
+ * order, so the first disc's copy of `audio 42` is the one the game plays —
+ * the opposite of the rule for resources in a Volume, which a later disc
+ * updates. Null when no disc's base map lists the number.
+ */
+export async function findSciDiscRecording(
+  resources: SciDiscAudioResources,
+  number: number,
+): Promise<SciDiscRecording | null> {
+  for (const disc of resources.discs) {
+    const map = await resources.readOnDisc('map', SCI_BASE_AUDIO_MAP, disc);
+    if (!map) continue;
+    const entry = readSciAudioMap(map, { sci32: resources.isSci32 }).find(
+      (each) => each.number === number,
+    );
+    if (!entry) continue;
+    const file = sciDiscAudioVolume(resources.layout.discAudioFiles, SCI_BASE_AUDIO_MAP, disc);
+    if (file) return { disc, file, offset: entry.offset };
+  }
+  return null;
 }

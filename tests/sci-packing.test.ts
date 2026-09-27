@@ -291,6 +291,9 @@ describe('the files a pack writes', () => {
         numberedMaps: false,
         alternate: null,
         mapFiles: ['sq6/RESOURCE.MAP'],
+        discs: [],
+        multiDiscAudio: false,
+        discAudioFiles: new Map(),
       },
     });
     expect(packed.files.map((file) => file.name)).toEqual(['RESOURCE.MAP', 'RESOURCE.000']);

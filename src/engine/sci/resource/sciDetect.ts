@@ -39,6 +39,26 @@ export interface SciLayout {
   /** Every map file, for a release that ships one per disc. */
   mapFiles: string[];
   /**
+   * Each numbered map beside the Volume of the same number, in disc order.
+   *
+   * ScummVM's `addAppropriateSources` pairs `RESMAP.00n` with `RESSCI.00n` and
+   * reads every pair, so a numbered-disc install — Phantasmagoria's seven, or
+   * GK2's six — is one game whose resources are spread over all of them. A map
+   * with no Volume of its own number is left out, as ScummVM leaves it out
+   * (GK2's Steam release ships a bogus `RESMAP.001` beside no `RESSCI.001`).
+   * Empty for a `RESOURCE.MAP` install.
+   */
+  discs: SciDisc[];
+  /**
+   * ScummVM's `_multiDiscAudio`: `RESSCI.001` present and `RESOURCE.AUD`
+   * absent, which means each disc's audio maps address that disc's own
+   * `RESAUD.00n` (and map 65535 its `RESSFX.00n`) rather than one shared
+   * `RESOURCE.AUD`.
+   */
+  multiDiscAudio: boolean;
+  /** Every per-disc audio Volume, upper-case base name to the name as listed. */
+  discAudioFiles: Map<string, string>;
+  /**
    * The alternate pack, when the release ships one, under `ALTERNATE_VOLUME`.
    *
    * Sierra's own `resource.cpp` opens three pairs by name, and this project had
@@ -54,6 +74,14 @@ export interface SciLayout {
    * so far except this one.
    */
   alternate: { mapFile: string; volume: number } | null;
+}
+
+/** One disc of a numbered install: its map, and the Volume of the same number. */
+export interface SciDisc {
+  /** The three-digit number both files share, which is also the disc's volume. */
+  number: number;
+  mapFile: string;
+  volumeFile: string;
 }
 
 /**
@@ -84,6 +112,7 @@ export function sciLayout(fileNames: string[]): SciLayout | null {
 
   const volumes = new Map<number, string>();
   const mapFiles: string[] = [];
+  const discAudioFiles = new Map<string, string>();
 
   // `RESOURCE.000`/`RESSCI.000` and, for a release that shipped its audio
   // separately, `RESSCI.PAT`. A volume is only claimed when its number parses,
@@ -92,6 +121,7 @@ export function sciLayout(fileNames: string[]): SciLayout | null {
     const volume = /^(?:resource|ressci)\.(\d{3})$/.exec(base);
     if (volume) volumes.set(Number(volume[1]), original);
     if (/^resmap\.(\d{3})$/.test(base)) mapFiles.push(original);
+    if (/^res(?:aud|sfx)\.(\d{3})$/.test(base)) discAudioFiles.set(base.toUpperCase(), original);
   }
 
   const numberedMaps = mapFiles.length > 0;
@@ -111,7 +141,29 @@ export function sciLayout(fileNames: string[]): SciLayout | null {
   if (alternate && alternateVolume) volumes.set(ALTERNATE_VOLUME, alternateVolume);
 
   mapFiles.sort((a, b) => baseName(a).localeCompare(baseName(b)));
-  return { mapFile: mapFiles[0], volumes, numberedMaps, mapFiles, alternate };
+
+  const discs: SciDisc[] = [];
+  if (numberedMaps) {
+    for (const mapFile of mapFiles) {
+      const number = Number(/\.(\d{3})$/.exec(baseName(mapFile))![1]);
+      const volumeFile = byBase.get(`ressci.${String(number).padStart(3, '0')}`);
+      if (volumeFile) discs.push({ number, mapFile, volumeFile });
+    }
+  }
+  const multiDiscAudio = numberedMaps && byBase.has('ressci.001') && !byBase.has('resource.aud');
+
+  return {
+    // The first map that has a Volume of its own, so a bogus unpaired map
+    // sorted ahead of the real ones is not the one detection reads.
+    mapFile: discs[0]?.mapFile ?? mapFiles[0],
+    volumes,
+    numberedMaps,
+    mapFiles,
+    alternate,
+    discs,
+    multiDiscAudio,
+    discAudioFiles: multiDiscAudio ? discAudioFiles : new Map(),
+  };
 }
 
 /**

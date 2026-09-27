@@ -36,7 +36,7 @@ import type { Sword2SoundReplacement } from '../authoring/sword2/soundContainer.
 import { setAudioResourceReader } from './audioBytes.js';
 import { exportAgosFiles } from './agos/exportAgos.js';
 import { exportSciGame } from '../authoring/sci/exportSciGame.js';
-import { packSciGame } from '../authoring/sci/packSciGame.js';
+import { packSciGame, sciPackDiscs } from '../authoring/sci/packSciGame.js';
 import { loadAdventureEngine } from '../engine/loadEngine.js';
 import { agosPreviewSource } from './agos/previewSource.js';
 import { overlaySource } from '../engine/resource/overlaySource.js';
@@ -46,6 +46,7 @@ import { exportSword2Game } from '../authoring/sword2/export.js';
 import { stringsOf } from './agos/gamePc.js';
 import { SciEditor } from './sci/SciEditor.js';
 import { carriedVolumes, openSciGameFolder, type SciGameFolder } from './sci/resupply.js';
+import { sciAudioReplacements } from './sci/audioExport.js';
 import { sciAudioReader } from './sci/audioResources.js';
 import { SkyEditor } from './sky/SkyEditor.js';
 import { LureEditor } from './lure/LureEditor.js';
@@ -924,7 +925,8 @@ objectWrap.append(objectArt.element, objectArt.help);
 const objectStrip = document.createElement('div');
 objectStrip.className = 'frame-strip';
 
-centre.append(
+/** Everything the SCUMM surface puts in the centre column, in order. */
+const scummCentre: HTMLElement[] = [
   tabs,
   toolbar,
   paletteStrip,
@@ -937,7 +939,28 @@ centre.append(
   objectPalette,
   objectWrap,
   objectStrip,
-);
+];
+centre.append(...scummCentre);
+
+/**
+ * Puts the SCUMM panes back in the centre column if another surface took it.
+ *
+ * Every other family mounts by `centre.replaceChildren(itsEditor.element)`,
+ * which detaches the room, sprite and object canvases. They were appended once,
+ * at start-up, and nothing ever appended them again — so a SCUMM project that
+ * followed any other family in the same page showed an empty centre column:
+ * no room, no player sprite, no object art, while the sidebar and inspector
+ * (rebuilt on every render) looked perfectly healthy.
+ *
+ * It happens on the most ordinary path there is. The editor opens on the
+ * autosaved project, and a game decompiled in the player arrives from IndexedDB
+ * a moment later — so importing a SCUMM game after an evening with a SCI one
+ * mounted the SCI surface first and then left its SCUMM successor blank.
+ */
+function mountScummSurface(): void {
+  if (tabs.parentElement === centre) return;
+  centre.replaceChildren(...scummCentre);
+}
 
 function renderTabs(): void {
   tabs.replaceChildren();
@@ -1571,9 +1594,13 @@ function renderSpritePalette(): void {
   });
   swatches.appendChild(eraser);
 
+  // The colours the sprite canvas draws with. An actor's palette holds game
+  // palette indices, so reading them through the editor's defaults showed an
+  // imported character's slots as pinks and greens beside a canvas of browns.
+  const colours = gamePalette();
   for (let index = 1; index <= COSTUME_COLORS; index++) {
     const paletteIndex = actor.palette[index - 1] ?? 15;
-    const entry = palette[paletteIndex] ?? [0, 0, 0];
+    const entry = colours[paletteIndex] ?? [0, 0, 0];
 
     const swatch = document.createElement('button');
     swatch.type = 'button';
@@ -1626,8 +1653,9 @@ function renderSpritePalette(): void {
   grid.className = 'palette-grid';
 
   const current = actor.palette[sprite.color - 1] ?? 15;
+  const gameColours = gamePalette();
   for (let index = 0; index < 256; index++) {
-    const entry = palette[index] ?? [0, 0, 0];
+    const entry = gameColours[index] ?? [0, 0, 0];
     const cell = document.createElement('button');
     cell.type = 'button';
     cell.className = index === current ? 'swatch selected' : 'swatch';
@@ -2339,6 +2367,7 @@ function renderActorInspector(): void {
           sprite.celIndex,
           gamePalette(),
           state.current.name,
+          sprite.facing,
         ).catch(reportExportFailure),
       'A PNG of the cel on screen, with its transparent pixels transparent',
     ),
@@ -2610,6 +2639,10 @@ async function sciExportSource(): Promise<SaveOptions['sciSource']> {
     mapVersion: open.game.mapVersion,
     layout: open.game.layout,
     carried: await carriedVolumes(open),
+    // Replaced recordings, which `packSciGame` writes into the audio Volume
+    // and the base audio map the carried bytes above came with (#227).
+    audio: await sciAudioReplacements(state.current),
+    discs: await sciPackDiscs(open.resources),
   };
 }
 
@@ -2935,9 +2968,20 @@ async function playSci(): Promise<string[]> {
   // Play and Save differ. Save writes a zip an author takes away, so it has to
   // contain the speech; Play reads it out of the folder underneath the overlay,
   // where it already is.
+  //
+  // **Unless a recording was replaced.** Then the audio Volume and the base
+  // audio map are rebuilt exactly as an export rebuilds them (#227), and the
+  // rebuilt Volume sits in the overlay above the folder's original — so Play
+  // hears what the exported install would. Only then is a Volume read in
+  // whole, because only then is there something to rebuild it with.
+  const audio = await sciAudioReplacements(state.current);
   const packed = packSciGame(built.resources, {
     mapVersion: open.game.mapVersion,
     layout: open.game.layout,
+    // A numbered-disc install packs back as its discs, so the overlay replaces
+    // every disc's map rather than leaving the others to disagree with it.
+    discs: await sciPackDiscs(open.resources),
+    ...(audio.length > 0 ? { carried: await carriedVolumes(open), audio } : {}),
   });
   if (packed.refused.length > 0) return [...packed.refused];
 
@@ -2949,7 +2993,10 @@ async function playSci(): Promise<string[]> {
       `Packed ${packed.resourceCount} resources into ${packed.mapFile} and ` +
         `${packed.volumeFile}: ${built.rebuilt.length} scripts rebuilt, ` +
         `${built.recomposed.length} Pictures recomposed.`,
-      `Read from ${open.name} underneath: ${open.carriedNames.join(', ') || 'no audio Volumes'}.`,
+      `Read from ${open.name} underneath: ${open.carriedNames.filter((name) => !packed.rebuiltVolumes.includes(name)).join(', ') || 'no audio Volumes'}.`,
+      ...(packed.rebuiltVolumes.length > 0
+        ? [`Rebuilt with a replaced recording: ${packed.rebuiltVolumes.join(', ')}.`]
+        : []),
     ]);
   } catch (error) {
     return [error instanceof Error ? error.message : String(error)];
@@ -3056,6 +3103,7 @@ function renderAll(): void {
     return;
   }
 
+  mountScummSurface();
   renderTabs();
   applyMode();
   renderSidebar();

@@ -27,8 +27,8 @@ per family rather than hiding it behind the word "supported".** SCUMM v4, v5 and
 v6 have real games behind them and v7 boots without playing; SCI answers King's
 Quest IV's copy-protection prompt and reaches its throne room, and packs an
 edited game back into its own container to play it; AGI walks King's
-Quest III through five rooms; AGOS runs the opcodes common to every Version and
-names the rest; Sky reaches a room; Lure reads and edits its world without
+Quest III through five rooms; AGOS runs every game opcode and every drawing opcode
+its reference installs; Sky reaches a room; Lure reads and edits its world without
 running its bytecode; Broken Sword runs, draws and edits and skips its
 cutscenes; Broken Sword II runs, draws and edits and does not walk. **`Completable`
 (`CONTEXT.md`) is claimed for no title in any family.**
@@ -215,8 +215,10 @@ question each family answers for itself.
 
 Neither is finished, and the two are not equally far along. **Sky reaches a
 room** on the freeware CD release — the opening screen drawn, seven hotspots the
-pointer finds, a click running the game's own script — and what is still missing
-is the walk grid, so nobody walks anywhere, and the sprites that would stand in
+pointer finds, a click running the game's own script — and a floor click walks
+Foster, as does a click on a thing, which walks him to it and runs its action.
+The route is a straight line, because the table naming which walk grid a screen
+uses is refused under ADR 0033, so he walks through scenery rather than around
 it (#256). **Lure runs no scripts at all** — its bytecode is a separate system from Sky's
 and this project reads neither yet — but it reads its world and edits part of
 it: 49 palettes, and where each of 125 hotspots stands, read out of the game's
@@ -363,6 +365,8 @@ LECF                            the data file
 
 ### Module map
 
+Paths are relative to `src/engine/`.
+
 | Module                        | Responsibility                                                 |
 | ----------------------------- | -------------------------------------------------------------- |
 | `resource/Chunk.ts`           | Chunk tree traversal                                           |
@@ -393,6 +397,8 @@ LECF                            the data file
 | `sound/AdLibDriver.ts`        | MIDI notes to OPL2 voices, with instruments and voice stealing |
 | `sound/scummAdl.ts`           | Finding the AdLib score inside a SCUMM sound resource          |
 | `sound/renderMusic.ts`        | Sequencing a score through the chip into samples               |
+| `sound/ImusePlayer.ts`        | iMUSE's live sequencer: one score, with a position that moves  |
+| `sound/pcSpeaker.ts`          | The PC speaker, for `SPK ` scores and v1–v4's speaker data     |
 | `ScummEngine.ts`              | World state and the frame loop                                 |
 | `AdventureEngine.ts`          | What a shell needs from a game, whichever family runs it       |
 | `loadEngine.ts`               | Which Engine family a set of files belongs to                  |
@@ -556,10 +562,13 @@ pick a folder once and every later save writes straight into it, no dialogs.
 Firefox and Safari have no such API, so Save downloads a zip containing the same
 files.
 
-Audio is the one thing that will push a project past that 5 MB cap quickly. It
-is stored inside the project JSON, like room art, so a project stays a single
-file — but a few minutes of music is larger than an entire hand-drawn game, and
-once local storage is full the editor falls back to IndexedDB automatically.
+Audio is the one thing that will push a project past that 5 MB cap quickly. A
+track up to 256 KB is stored inside the project JSON, like room art; anything
+larger goes to the browser's IndexedDB audio store and the project keeps a key
+to it. **Save** and the project-only export both write those tracks into an
+`audio/` folder beside the JSON, so the saved project still reopens anywhere
+with every track playable. The autosaved project itself falls back to
+IndexedDB once local storage is full.
 Two consequences worth knowing: importing and deleting audio are **not
 undoable** (the undo stack deliberately does not copy megabytes of it, so the
 editor asks before removing a track), and importing a published game caps how
@@ -571,13 +580,14 @@ you have changes that have never been exported, and the tab warns before closing
 on unsaved work. The **project `.json` is the real save**: back it up, commit it,
 re-import it anywhere.
 
-Saving writes four files:
+Saving writes four files, and a fifth folder when there is large audio:
 
 ```
 my-game.scummproj.json   the project — this is the source of truth
 MYGAME.000               compiled index
 MYGAME.001               compiled data
 manifest.json            so ?game=… can load the folder
+audio/                   tracks too large to live inside the JSON
 ```
 
 Drop that folder into `public/games/` and it plays at `?game=<folder>`.
@@ -603,7 +613,15 @@ npm start             # then open http://localhost:5160/?game=demo
 A game is a TypeScript module that default-exports a `GameBuilder`:
 
 ```ts
-import { defineGame, createImage, rect, pixels } from '../../src/authoring/index.js';
+import {
+  defineGame,
+  createImage,
+  rect,
+  rectangleBox,
+  pixels,
+  verticalGradient,
+  maskRect,
+} from '../../src/authoring/index.js';
 
 const game = defineGame({
   name: 'Nightfall',
@@ -625,7 +643,8 @@ game.actor({
 const street = game.room({
   id: 1,
   background: streetArt,
-  boxes: [{ x: 0, y: 108, width: 320, height: 36 }],
+  // A walk box is a convex quadrilateral; rectangleBox builds the common case.
+  boxes: [rectangleBox(0, 108, 320, 36)],
 });
 
 street
@@ -709,6 +728,8 @@ const key = pixels(
 
 ### Authoring module map
 
+Paths are relative to `src/`.
+
 | Module                        | Responsibility                                     |
 | ----------------------------- | -------------------------------------------------- |
 | `authoring/GameBuilder.ts`    | The declarative surface: rooms, objects, actors    |
@@ -745,9 +766,12 @@ Implemented:
   opcode set
 - SCUMM **v6** resource loading — `PALS` palettes, `AARY` script arrays, `DOBJ`
   class data — and the full v6 opcode set, all 160 instructions
-- Room backgrounds, objects, z-plane masking, palette cycling, scrolling
+- Room backgrounds, objects, z-plane masking, palette cycling, scrolling, and
+  **floating objects** — objects a script adds to a room at runtime
+- **Shadow palettes**, the translucency tables actors and blasted objects are
+  shaded through, and v2–v4's room colour remap
 - Costume rendering with per-limb animation, scaling and mirroring, in both v5's
-  format and v6's `AKOS`
+  format and v6's `AKOS` — all three AKOS codecs (1, BOMP's 5 and MajMin's 16)
 - Walk box pathfinding, actor movement, turning and animation
 - Text rendering, speech placement and the verb interface
 - Digitised sound effects and speech via Web Audio, from the game's own
@@ -755,7 +779,10 @@ Implemented:
 - Recorded speech from a talkie release's `MONSTER.SOU`, with lines that last as
   long as their audio
 - **AdLib music**, synthesised through an emulated OPL2 — the `ADL ` score is
-  read as MIDI and played on the chip it was written for
+  read as MIDI and played on the chip it was written for, sequenced live by an
+  iMUSE player so that jumps, loops, hooks and fades land while it plays
+- **PC speaker music**, and Roland scores played on the OPL2 through the MT-32
+  to General MIDI map
 - **Saved games**, in this project's own format, kept between sessions — ten
   named slots per game, and a Load menu that lists every game you have saves for
 - Loading games from a `.zip`, and naming non-SCUMM data instead of failing
@@ -779,31 +806,26 @@ against LucasArts' own freely distributed demos
 What it does **not** establish is _completable_, which is a claim about a game's
 last screen. Neither retail game has been played through here, and a demo cannot
 stand in for that. The remaining known gaps a playthrough would meet are listed
-below — floating objects in particular, which are how Sam & Max carries some of
-its inventory.
+below.
 
 Not implemented:
 
-- **Roland MT-32 and PC speaker synthesis.** Only the OPL2 is emulated. A score
-  that shipped without an AdLib arrangement is still played on it, labelled
-  "no AdLib version", which gives the right notes with the wrong timbre — worth
-  much more than refusing to play it. A Roland `.rom` is instrument data for a
-  synthesiser that is not here, not a piece of music.
-- **iMUSE sequencing.** A score is rendered to samples up front and played, so
-  the commands that need a live sequencer cannot be served. The ones that can be
-  are: starting and stopping music, volume, and the markers a score carries, so
-  music follows the game rather than looping obliviously. The rest are named in
-  the log once each rather than dropped.
-- **Shadow palettes**, used for a handful of translucency effects, and objects
-  a script asks to be drawn straight over the room. Both are named in the log
-  rather than silently skipped.
-- **Floating objects** — objects a script adds to a room at runtime.
+- **Roland MT-32 synthesis.** A Roland `ROL ` score is played, not refused:
+  its programmes go through the MT-32 to General MIDI map onto a General MIDI
+  bank on the emulated OPL2, so it gives the right notes with an AdLib's
+  timbre. A real MT-32 is a linear-arithmetic synthesiser whose sounds live in
+  two copyrighted mask ROMs; emulating it is Munt's job, and neither Munt nor
+  the ROMs are here. An MT-32 or CM-32L `.rom` imported into a project is
+  recognised and named — which ROM, which firmware — rather than played.
 - **SCUMM v7** (Full Throttle, The Dig) beyond booting. A v7 index, its
   directories and its rooms are read, a v7 interpreter runs its scripts on the
   stack machine it shares with v6, SMUSH video plays, and iMUSE Digital's script
   commands are read at v7's own numbering rather than v6's — but _which_
   recording a musical state or sequence names comes out of a table built into
-  the original interpreter, one per game, and those tables are not here. A state
+  the original interpreter, one per game, and those tables are not here. Data
+  that lives in an executable is read from the executable (ADR 0024) or derived
+  from shipped bytes (ADR 0033), not copied out of another implementation, and
+  no original v7 interpreter has been available to read them from. A state
   whose number happens to name a bundle cue plays; the rest are named in the log
   once. So v7 is not playable and is not claimed to be.
 - **A named checkpoint in v2, v3 or v8.** All three load, run and edit, and all
@@ -823,6 +845,24 @@ Not implemented:
   their own right. ScummVM has 126 engines;
   [`docs/scummvm-parity-roadmap.md`](docs/scummvm-parity-roadmap.md) measures
   what the rest would cost and which ten are worth having.
+
+Since this list was first written, three of its items have left it. **iMUSE is
+sequenced live** (`sound/ImusePlayer.ts`, a port of ScummVM's `Player`): jumps,
+scans, loops, hooks, markers, transpose, detune, parts, tempo, faders, priority
+and pan, Sam & Max's triggers and deferred commands, and the command queue, all
+sharing one OPL2 with voice stealing and streamed about 80 ms ahead, and saved
+with the game. Day of the Tentacle's "command 255" and "command 1" are served
+rather than logged. Audio imported into a project still renders up front, as
+the author heard it in the editor. **The PC speaker is synthesised** — v5/v6's
+`SPK ` scores through a port of iMUSE's speaker driver, and v1–v4's speaker
+data through a port of `Player_V2`. And **every shadow mode the original
+draws is drawn**: v5/v6's one table, v7's eight, v3/v4's slots and room colour
+remap, v8's tables through kernel calls 108 and 109, on classic costumes, AKOS
+modes 1 and 3 and blast objects. A scaled blast object is drawn unshaded, as
+the original does. AKOS mode 2 draws as mode 0, as ScummVM's shipped decoder
+does, and a v6 mode-3 pixel in colours 1–7 is drawn unshaded because the
+original reads past its single 256-byte table there; both of those are named in
+the log once.
 
 A version this engine has no interpreter for is _detected_ and refused by name
 rather than loaded and left to fail: `detectGame` throws before the resource

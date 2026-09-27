@@ -459,6 +459,20 @@ export class SciCompositor {
     return repair;
   }
 
+  /**
+   * Everything, from a cleared frame, with the dirty tracking told so.
+   *
+   * For a frame the dirty path cannot repair — one shifted by a screen shake,
+   * or the first unshifted one after it — and which the next dirty frame must
+   * still be able to repair *from*: without resetting what "last frame" was,
+   * an item that moved during the shake leaves its shaken position behind.
+   */
+  compositeFull(target: Uint8Array, width: number, height: number): void {
+    target.fill(0);
+    this.composite(target, width, height);
+    this.previous = this.rectangles();
+  }
+
   /** Where everything currently sits, in framebuffer coordinates. */
   private rectangles(): Rect[] {
     const rects: Rect[] = [];

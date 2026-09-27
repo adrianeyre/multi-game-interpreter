@@ -142,6 +142,12 @@ the same way `Palette` and `Screen` are.
 What neither has is an exporter. Both engines say so, on their own status lines
 and in `released-games.md`, rather than in a footnote.
 
+_Amended since:_ both now have one. `src/authoring/sword1/export.ts` and
+`src/authoring/sword2/export.ts` rebuild each family's own containers, and an
+unedited export is byte-identical to the install it came from
+(`npm run reexport:sword`). The sentence above is kept as what was true when
+this was decided.
+
 **`engineSignatures.ts` loses two entries and one of them was wrong.** Broken
 Sword II was matched on `general.clu`, a file _both_ games ship — so a folder
 holding either game matched the Sword2 signature, and a folder holding both

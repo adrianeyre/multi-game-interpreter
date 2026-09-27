@@ -142,6 +142,35 @@ export interface VgaHost {
    * leave an actor walking a route the script had discarded.
    */
   clearPathfind(): void;
+  /**
+   * The points of one route, for The Feeble Files' `COMPUTEXY` and
+   * `COMPUTEPOSNUM`.
+   *
+   * Those two read the route table directly — `_pathFindArray[route - 1]` in
+   * `vc78_computeXY` and `vc79_computePosNum` — rather than through the
+   * selection `COMPUTE_YOFS` makes, so the route is named by the number
+   * `SET_PATHFIND_ITEM` stored it under. Null when there is no such route,
+   * which the machine records by name rather than reading zeroes.
+   */
+  pathRoute(route: number): readonly (readonly [number, number])[] | null;
+  /**
+   * The next of the path values a game script handed over, for `GETPATHVALUE`.
+   *
+   * `vc82_getPathValue` reads `_pathValues[_GPVCount++]`, a list the *game*
+   * bytecode fills (`off_setPathValues`) and the drawing bytecode consumes one
+   * at a time. Null when there is nothing to read, which is not the same
+   * answer as zero and is reported rather than written.
+   */
+  nextPathValue(): number | null;
+  /**
+   * Starts The Feeble Files' looping sound channel, which `PLAYSOUNDLOOP` asks
+   * for — `vc83_playSoundLoop` loads the sound into the reference's fifth
+   * effects channel (`TYPE_SFX5`), which loops until stopped. The operands are
+   * the reference's, in its order: sound, volume, pan.
+   */
+  playSoundLoop(sound: number, volume: number, pan: number): void;
+  /** Stops the looping channel, which `STOPSOUNDLOOP` (`vc84`) asks for. */
+  stopSoundLoop(): void;
 }
 
 /** What a {@link RecordingVgaHost} was asked for, so a test or a sweep can read it. */
@@ -170,6 +199,14 @@ export interface VgaHostRecord {
   readonly pathfindRoutes: number;
   readonly pathfinderComputations: number;
   readonly pathfindClears: number;
+  /** Route numbers `COMPUTEXY`/`COMPUTEPOSNUM` asked for the points of. */
+  readonly routesRead: readonly number[];
+  /** How many path values a script asked for. */
+  readonly pathValuesRead: number;
+  /** Sounds a script asked to loop, which a test reads. */
+  readonly soundLoopsStarted: readonly number[];
+  /** How many times a script asked the looping channel to stop. */
+  readonly soundLoopStops: number;
 }
 
 /**
@@ -198,6 +235,10 @@ export class RecordingVgaHost implements VgaHost {
   private pathfindRouteCount = 0;
   private pathfinderComputeCount = 0;
   private pathfindClearCount = 0;
+  private readonly routesRead: number[] = [];
+  private pathValueCount = 0;
+  private readonly loopsStarted: number[] = [];
+  private loopStopCount = 0;
 
   objectHere(): boolean {
     this.objectQueryCount += 1;
@@ -285,6 +326,24 @@ export class RecordingVgaHost implements VgaHost {
     this.pathfindClearCount += 1;
   }
 
+  pathRoute(route: number): readonly (readonly [number, number])[] | null {
+    this.routesRead.push(route);
+    return null;
+  }
+
+  nextPathValue(): number | null {
+    this.pathValueCount += 1;
+    return null;
+  }
+
+  playSoundLoop(sound: number): void {
+    this.loopsStarted.push(sound);
+  }
+
+  stopSoundLoop(): void {
+    this.loopStopCount += 1;
+  }
+
   get record(): VgaHostRecord {
     return {
       objectQueries: this.objectQueryCount,
@@ -305,6 +364,10 @@ export class RecordingVgaHost implements VgaHost {
       pathfindRoutes: this.pathfindRouteCount,
       pathfinderComputations: this.pathfinderComputeCount,
       pathfindClears: this.pathfindClearCount,
+      routesRead: [...this.routesRead],
+      pathValuesRead: this.pathValueCount,
+      soundLoopsStarted: [...this.loopsStarted],
+      soundLoopStops: this.loopStopCount,
     };
   }
 }

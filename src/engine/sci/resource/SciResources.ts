@@ -27,7 +27,7 @@ import {
   type SciMapEntry,
   type SciMapVersion,
 } from './resourceMap.js';
-import type { SciLayout } from './sciDetect.js';
+import { ALTERNATE_VOLUME, type SciLayout } from './sciDetect.js';
 import { sciResourceType, type SciResourceType } from './sciResourceTypes.js';
 
 /** How a resource header is laid out, which is a property of the map's era. */
@@ -178,6 +178,10 @@ export class SciResources {
 
   private readonly volumes: VolumeReader;
   private readonly entries = new Map<string, SciMapEntry>();
+  /** Each map's own entries, by disc (the map's number; 0 for a single map). */
+  private readonly discEntries = new Map<number, Map<string, SciMapEntry>>();
+  /** Which disc the whole-game table's entry for a key came from. */
+  private readonly servedFrom = new Map<string, number>();
   private readonly byType = new Map<SciResourceType, number[]>();
   private readonly cache = new Map<string, Uint8Array>();
   private readonly shape: HeaderShape;
@@ -240,31 +244,168 @@ export class SciResources {
       log,
     );
 
-    const entries = isDirectoryMap(mapVersion)
+    const first = isDirectoryMap(mapVersion)
       ? readSci1Map(map, mapVersion)
       : readSci0Map(map, mapVersion);
 
-    // A release that ships one map per disc carries the map's own number into
-    // every entry's volume, because the entry's field is a number within that
-    // disc. Ignoring it reads disc two's resources out of disc one.
-    const mapNumber = layout.numberedMaps ? volumeNumberOf(layout.mapFile) : 0;
-
-    for (const entry of entries) {
-      const volume = layout.numberedMaps ? entry.volume + mapNumber : entry.volume;
-      const key = `${entry.type}:${entry.number}`;
-      resources.entries.set(key, { ...entry, volume });
-      const list = resources.byType.get(entry.type) ?? [];
-      list.push(entry.number);
-      resources.byType.set(entry.type, list);
+    if (layout.discs.length > 1) {
+      await resources.loadDiscs(source, first, log);
+    } else {
+      // A release that ships one map per disc carries the map's own number into
+      // every entry's volume, because the entry's field is a number within that
+      // disc. Ignoring it reads disc two's resources out of disc one.
+      const mapNumber = layout.numberedMaps ? volumeNumberOf(layout.mapFile) : 0;
+      for (const entry of first) {
+        const volume = layout.numberedMaps ? entry.volume + mapNumber : entry.volume;
+        resources.add({ ...entry, volume }, mapNumber, 'last');
+      }
+      log(
+        `Read ${first.length} resources from ${layout.mapFile} ` +
+          `(${mapVersion} map, ${layout.volumes.size} volume${layout.volumes.size === 1 ? '' : 's'})`,
+      );
     }
-    log(
-      `Read ${entries.length} resources from ${layout.mapFile} ` +
-        `(${mapVersion} map, ${layout.volumes.size} volume${layout.volumes.size === 1 ? '' : 's'})`,
-    );
 
     await resources.loadAlternate(source, log);
     for (const list of resources.byType.values()) list.sort((a, b) => a - b);
     return resources;
+  }
+
+  /**
+   * Records one entry, in the whole-game table and in its disc's own.
+   *
+   * `rule` is which copy the whole-game table keeps when two maps list the
+   * same type and number: `first` for the alternate pack (the main map wins),
+   * `last` for numbered discs, which is ScummVM's `readResourceMapSCI1` — a
+   * later disc's entry *updates* an earlier one when both are in a Volume.
+   */
+  private add(entry: SciMapEntry, disc: number, rule: 'first' | 'last'): boolean {
+    const key = `${entry.type}:${entry.number}`;
+    let own = this.discEntries.get(disc);
+    if (!own) {
+      own = new Map();
+      this.discEntries.set(disc, own);
+    }
+    own.set(key, entry);
+
+    const known = this.entries.has(key);
+    if (known && rule === 'first') return false;
+    this.entries.set(key, entry);
+    this.servedFrom.set(key, disc);
+    if (!known) {
+      const list = this.byType.get(entry.type) ?? [];
+      list.push(entry.number);
+      this.byType.set(entry.type, list);
+    }
+    return !known;
+  }
+
+  /**
+   * Every disc's map, for a release that ships its game across numbered discs.
+   *
+   * ScummVM's `addAppropriateSources` reads `RESMAP.00n` beside `RESSCI.00n`
+   * for every n and `readResourceMapSCI1` adds the map's own number to each
+   * entry's volume, so an entry on disc three is read out of `RESSCI.003`.
+   * Where two discs list the same resource the later one is what the game
+   * reads — ScummVM *updates* a Volume entry it has already seen — and every
+   * disc's own list is kept too, because a disc's audio maps are that disc's
+   * and not the game's: each addresses its own `RESAUD.00n`, and the same map
+   * number on two discs is two different tables.
+   *
+   * A disc whose map cannot be read is a log line, not a throw: the first map
+   * has already been read and identified, and the others only add.
+   */
+  private async loadDiscs(
+    source: DataSource,
+    first: SciMapEntry[],
+    log: (message: string) => void,
+  ): Promise<void> {
+    const directory = isDirectoryMap(this.mapVersion);
+    for (const disc of this.layout.discs) {
+      let entries: SciMapEntry[];
+      if (disc.mapFile === this.layout.mapFile) {
+        entries = first;
+      } else {
+        const bytes = await source.read(disc.mapFile);
+        if (!bytes) {
+          log(`${disc.mapFile} is named by the layout but could not be read, so it is skipped.`);
+          continue;
+        }
+        try {
+          entries = directory
+            ? readSci1Map(bytes, this.mapVersion)
+            : readSci0Map(bytes, this.mapVersion);
+        } catch (error) {
+          log(
+            `${disc.mapFile} could not be read as a resource map (${String(error)}), so it is skipped.`,
+          );
+          continue;
+        }
+      }
+      for (const entry of entries) {
+        this.add({ ...entry, volume: entry.volume + disc.number }, disc.number, 'last');
+      }
+      log(`Read ${entries.length} resources from ${disc.mapFile} (disc ${disc.number}).`);
+    }
+    log(
+      `${this.layout.discs.length} discs, ${this.entries.size} distinct resources ` +
+        `(${this.mapVersion} maps)`,
+    );
+  }
+
+  /** The discs whose maps were read, in order; one or none for a single-map install. */
+  get discs(): number[] {
+    return [...this.discEntries.keys()]
+      .filter((disc) => disc !== ALTERNATE_VOLUME)
+      .sort((a, b) => a - b);
+  }
+
+  /** True when the game's resources are spread over more than one numbered disc. */
+  get isMultiDisc(): boolean {
+    return this.layout.discs.length > 1 && this.discs.length > 1;
+  }
+
+  /** Which disc's map the whole-game table reads a resource through. */
+  discOf(type: SciResourceType, number: number): number | null {
+    return this.servedFrom.get(`${type}:${number}`) ?? null;
+  }
+
+  /** Resource numbers of a type that one disc's own map lists, in order. */
+  listOnDisc(disc: number, type: SciResourceType): number[] {
+    const own = this.discEntries.get(disc);
+    if (!own) return [];
+    return [...own.values()]
+      .filter((entry) => entry.type === type)
+      .map((entry) => entry.number)
+      .sort((a, b) => a - b);
+  }
+
+  /** Every `type:number` one disc's own map lists, in the map's order. */
+  keysOnDisc(disc: number): string[] {
+    return [...(this.discEntries.get(disc)?.keys() ?? [])];
+  }
+
+  /**
+   * One resource as a particular disc holds it.
+   *
+   * The same as `read` for every resource only one disc lists. For one two
+   * discs both list — an audio map, above all — this is that disc's copy and
+   * not the one the whole-game table serves.
+   */
+  async readOnDisc(
+    type: SciResourceType,
+    number: number,
+    disc: number,
+  ): Promise<Uint8Array | null> {
+    const key = `${type}:${number}`;
+    const entry = this.discEntries.get(disc)?.get(key);
+    if (!entry) return null;
+    if (this.servedFrom.get(key) === disc) return this.read(type, number);
+    const cacheKey = `${disc}/${key}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+    const bytes = await this.readEntry(type, number, entry);
+    if (bytes) this.cache.set(cacheKey, bytes);
+    return bytes;
   }
 
   /**
@@ -309,13 +450,7 @@ export class SciResources {
 
     let added = 0;
     for (const entry of readSci1Map(map, mapVersion)) {
-      const key = `${entry.type}:${entry.number}`;
-      if (this.entries.has(key)) continue;
-      this.entries.set(key, { ...entry, volume: alternate.volume });
-      const list = this.byType.get(entry.type) ?? [];
-      list.push(entry.number);
-      this.byType.set(entry.type, list);
-      added++;
+      if (this.add({ ...entry, volume: alternate.volume }, alternate.volume, 'first')) added++;
     }
     log(
       `Read ${added} more resources from ${alternate.mapFile} ` +
@@ -357,6 +492,17 @@ export class SciResources {
     const entry = this.entries.get(key);
     if (!entry) return null;
 
+    const bytes = await this.readEntry(type, number, entry);
+    if (bytes) this.cache.set(key, bytes);
+    return bytes;
+  }
+
+  /** Reads and decompresses the resource one map entry addresses. */
+  private async readEntry(
+    type: SciResourceType,
+    number: number,
+    entry: SciMapEntry,
+  ): Promise<Uint8Array | null> {
     const file = this.layout.volumes.get(entry.volume);
     if (!file) {
       this.refuse(type, number, `volume ${entry.volume} is not present in this install`);
@@ -427,7 +573,6 @@ export class SciResources {
       return null;
     }
 
-    this.cache.set(key, bytes);
     return bytes;
   }
 

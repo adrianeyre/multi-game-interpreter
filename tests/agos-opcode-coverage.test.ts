@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { OPCODE_NAMES } from '../src/engine/agos/script/opcodeNames.js';
 import { VGA_OPCODE_TABLES } from '../src/engine/agos/gfx/vgaOpcodeTables.js';
+import { VGA_REFERENCE_UNASSIGNED } from '../src/engine/agos/gfx/vgaReferenceSlots.js';
 
 /**
  * How much of each Version's instruction set actually runs.
@@ -21,6 +22,12 @@ function handledNames(path: string): Set<string> {
   const names = new Set<string>();
   // Game opcodes are named `o_carried`, VGA ones `DRAW`, so both cases match.
   for (const match of source.matchAll(/case '([A-Za-z][A-Za-z0-9_]*)':/g)) {
+    names.add(match[1]!);
+  }
+  // An opcode the run loop takes before the switch — `JUMP_REL`, whose
+  // target needs the decoded instruction list the switch never sees — is
+  // handled by a name comparison rather than a label, and is just as real.
+  for (const match of source.matchAll(/instruction\.name === '([A-Za-z][A-Za-z0-9_]*)'/g)) {
     names.add(match[1]!);
   }
   return names;
@@ -54,8 +61,14 @@ describe('how much of AGOS actually runs', () => {
   it('reports VGA script coverage per Version', () => {
     const rows: string[] = [];
     for (const [version, table] of Object.entries(VGA_OPCODE_TABLES)) {
-      // A VGA entry is `letters|NAME`, so the name is what follows the bar.
-      const names = table.map((entry) => (entry ? (entry.split('|')[1] ?? null) : null));
+      // A VGA entry is `letters|NAME`, so the name is what follows the bar. A
+      // slot the reference never assigns a routine to is named but not real,
+      // and counting it would put work in the total that nobody can do — see
+      // `vgaReferenceSlots.ts`.
+      const unassigned = new Set(VGA_REFERENCE_UNASSIGNED[version] ?? []);
+      const names = table.map((entry, slot) =>
+        entry && !unassigned.has(slot) ? (entry.split('|')[1] ?? null) : null,
+      );
       const { total, covered } = coverage(names, vgaHandled);
       rows.push(`${version}: ${covered}/${total}`);
       expect(covered).toBeGreaterThan(0);

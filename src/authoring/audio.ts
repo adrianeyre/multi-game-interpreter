@@ -1,6 +1,7 @@
 import { findChunkDeep, readChunkHeader } from '../engine/resource/Chunk.js';
 import { looksLikeGmf, looksLikeMidiBundle } from '../engine/agos/sound/music.js';
 import { looksLikeXmidi } from '../engine/agos/sound/xmidi.js';
+import { identifyMt32Rom, mt32RomNotice } from '../engine/sound/mt32.js';
 import { findMidiData } from '../engine/sound/scummAdl.js';
 import { fromBase64, toBase64 } from './base64.js';
 
@@ -234,10 +235,22 @@ export function whyUnplayable(format: AudioFormat): string | null {
     case 'smush':
       return 'This is a SMUSH animation or font file, not audio.';
     case 'mt32-rom':
-      return 'This is Roland MT-32 instrument data — the ROM a synthesiser needs, not a piece of music.';
+      return 'This is Roland MT-32 instrument data — the ROM a synthesiser needs, not a piece of music. True MT-32 sound would need an LA-synthesis emulator driven by both ROMs, which this engine does not include; Roland scores play on the emulated AdLib with General MIDI instruments instead.';
     default:
       return null;
   }
+}
+
+/**
+ * The import report's line for a Roland ROM, naming which one it is.
+ *
+ * Null for anything that is not one. "Roland MT-32 ROM" is true of four
+ * different files; saying "MT-32 control ROM (v1.07)" or "CM-32L PCM ROM" is
+ * what lets an author check they have the pair a synthesiser would need.
+ */
+export function describeRom(bytes: Uint8Array, filename: string): string | null {
+  const rom = identifyMt32Rom(bytes, filename);
+  return rom ? mt32RomNotice(rom) : null;
 }
 
 /** How far into a file to look for a synthesiser ROM's name. */

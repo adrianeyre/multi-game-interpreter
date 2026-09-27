@@ -12,7 +12,12 @@
  */
 
 import { AudioLibrary, describeTrack } from './AudioLibrary.js';
-import { describeFormat, isPlayableFormat, whyUnplayable } from '../authoring/audio.js';
+import {
+  describeFormat,
+  describeRom,
+  isPlayableFormat,
+  whyUnplayable,
+} from '../authoring/audio.js';
 import { missingBytesReason, readTrackBytes } from './audioBytes.js';
 import { audioFileName, audioMimeType } from './audioSave.js';
 import { downloadBlob } from './storage.js';
@@ -520,10 +525,15 @@ export class AudioSection {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const track = await this.options.add(file.name, bytes);
         const reason = whyUnplayable(track.format);
+        // A Roland ROM is reported by name — which one, which firmware — so
+        // an author can tell whether they have the pair.
+        const rom = track.format === 'mt32-rom' ? describeRom(bytes, file.name) : null;
         report.push(
-          reason
-            ? `${file.name}: ${describeFormat(track.format)} — ${reason}`
-            : `${file.name}: imported as ${describeFormat(track.format)} (sound ${track.id})`,
+          rom
+            ? `${file.name}: ${rom}`
+            : reason
+              ? `${file.name}: ${describeFormat(track.format)} — ${reason}`
+              : `${file.name}: imported as ${describeFormat(track.format)} (sound ${track.id})`,
         );
       } catch (error) {
         report.push(`${file.name}: could not be read — ${String(error)}`);

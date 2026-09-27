@@ -1,4 +1,4 @@
-import { ObjectWhere, ScriptStatus, TEXT_SLOT, TEXT_SLOT_COUNT } from '../constants.js';
+import { ObjectWhere, ScriptStatus, TEXT_SLOT, TEXT_SLOT_COUNT, VAR } from '../constants.js';
 import type { ScummEngine, SubOpcodeEffect } from '../ScummEngine.js';
 import type { ScriptState } from './ScriptState.js';
 import type { DeclaredArrayKind } from './ScriptArrays.js';
@@ -1248,9 +1248,9 @@ export abstract class StackScriptEngine extends ScriptScheduler {
       this.push(this.engine.sound.isSoundRunning(this.pop()) ? 1 : 0);
     });
     op(0xac, function () {
-      // iMUSE. The sound-scope commands are acted on; the ones that need a live
-      // sequencer are recorded and named once each.
-      this.engine.sound.kludge(this.popList(16));
+      // iMUSE. Its answer goes where `processSoundQues` puts it, which is how
+      // a script reads a player's parameters or the command queue back.
+      this.engine.variables[VAR.SOUNDRESULT] = this.engine.sound.kludge(this.popList(16));
     });
 
     // --- numbers -----------------------------------------------------------

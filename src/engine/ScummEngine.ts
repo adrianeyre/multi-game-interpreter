@@ -24,7 +24,13 @@ import {
   V7_CLIP_FROM_BOX,
 } from './actor/Actor.js';
 import { buildCostumePalette, drawCel } from './gfx/CostumeRenderer.js';
-import { choreFor, decodeAkosCel, parseAkos, type AkosCostume } from './gfx/costume/akos.js';
+import {
+  AkosCodec,
+  choreFor,
+  decodeAkosCel,
+  parseAkos,
+  type AkosCostume,
+} from './gfx/costume/akos.js';
 import { stepChore, type ChoreVars } from './gfx/costume/chore.js';
 import { Charset, layoutSpeech, wrapText } from './gfx/Charset.js';
 import {
@@ -37,10 +43,11 @@ import {
   oldDirToNewDir,
 } from './gfx/Costume.js';
 import { Palette } from './gfx/Palette.js';
+import { ShadowPalette, type ShadowRule } from './gfx/ShadowPalette.js';
 import { RoomGraphics, findObjectImage } from './gfx/RoomGraphics.js';
-import { bompScaleMask, decodeBomp } from './gfx/costume/bomp.js';
+import { decodeBomp, drawBomp } from './gfx/costume/bomp.js';
 import { SCREEN_HEIGHT, SCREEN_WIDTH, Screen } from './gfx/Screen.js';
-import { hexWindow } from './util/ByteStream.js';
+import { hexWindow, readU32LE } from './util/ByteStream.js';
 import { SMALL_CHUNK_HEADER_SIZE, findChunk, readChunkHeader } from './resource/Chunk.js';
 import type { DataSource } from './resource/DataSource.js';
 import { VideoPlayback } from './video/VideoPlayback.js';
@@ -52,7 +59,7 @@ import { detectGame } from './resource/GameDetector.js';
 import { LoadProgressTracker } from './resource/progress.js';
 import { ResourceManager, type ResourceType } from './resource/ResourceManager.js';
 import { BoxMatrix } from './room/BoxMatrix.js';
-import { INVALID_BOX, Room, type RoomObject } from './room/Room.js';
+import { INVALID_BOX, Room, type RoomObject, type RoomObjectImage } from './room/Room.js';
 import { captureState, restoreState, SAVE_FORMAT, type SavedGame } from './save/SaveState.js';
 import { SAVE_LOCATION_NOTE } from './save/SaveStore.js';
 import { speechDurationFrames, textDurationFrames } from './sound/speech.js';
@@ -289,24 +296,19 @@ const BLAST_OBJECT_QUEUE_SIZE = 200;
  * Bytes of header a `BOMP` carries before its runs.
  *
  * Two unused, then the width and height, then a two-byte pad in each axis.
- * v8 uses a different shape, which no game here is.
+ * v8 uses a different shape; see `blastObjectImageV8`.
  */
 const BOMP_HEADER_SIZE = 10;
 
-/**
- * The colour a blast object treats as transparent.
- *
- * Not zero, which is what a costume cel uses: the original decodes a blast
- * object's runs with zeros written and then compares each pixel against 255 on
- * its way to the screen. Getting this the wrong way round leaves a black
- * rectangle behind the verb coin and drops whatever the artwork drew in white.
- * (`drawBlastObject` passes 255 to `bompApplyShadow`, and `drawBomp` decodes
- * with `setZero` left at its default of true.)
- */
-const BLAST_OBJECT_TRANSPARENT = 255;
-
 /** Full scale in each axis: the value that means "do not scale at all". */
 const BLAST_OBJECT_FULL_SCALE = 255;
+
+/** 256 entries, each naming itself: a colour map that changes nothing. */
+function identityColourMap(): Uint8Array {
+  const map = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) map[i] = i;
+  return map;
+}
 
 /**
  * The SCUMM v5 virtual machine and renderer.
@@ -355,6 +357,24 @@ export class ScummEngine implements AdventureEngine {
 
   readonly screen = new Screen();
   readonly palette = new Palette();
+  /**
+   * The shadow palette(s): `_shadowPalette` in the reference.
+   *
+   * Replaced once the version is known, because v7 keeps eight tables where
+   * every earlier version keeps one, and v3/v4 read it at palette upload rather
+   * than while drawing sprites. See `ShadowPalette` for the three uses.
+   */
+  shadowPalette = new ShadowPalette(5);
+  /**
+   * v2-v4's room colour map (`_roomPalette`): a background colour to the
+   * colour it is drawn as.
+   *
+   * Written by `roomOps` "room colour" and consulted by the old strip decoders
+   * only — EGA and pre-v4 256-colour backgrounds, never actors or v4's
+   * VGA codecs — which is why it is applied to the room when it is composited
+   * and nowhere else. Identity on every room entry.
+   */
+  readonly roomColours = identityColourMap();
   /**
    * The interpreter for this game's SCUMM version.
    *
@@ -694,10 +714,18 @@ export class ScummEngine implements AdventureEngine {
       this.log(`Using the SCUMM v2 interpreter for "${game.id}"`);
     }
     this.scummVersion = game.version;
+    this.installShadowPalette(game.version, game.id);
     // The Dig, and nothing else. See `replacesActorsOnRebuild`.
     this.replacesActorsOnRebuild = game.version === 7 && game.id.toLowerCase() === 'dig';
     this.numGlobalScripts = game.version >= 7 ? 2000 : 200;
     this.sound.attach(this.resources);
+    // Two iMUSE facts about the title, as ScummVM keys them: Sam & Max numbers
+    // some commands differently (`_newSystem`), and Day of the Tentacle clamps
+    // a transpose to an octave where the others allow two.
+    this.sound.configureImuse({
+      newSystem: game.version === 6 && game.id.toLowerCase().startsWith('samnmax'),
+      transposeLimit: game.id.toLowerCase().startsWith('tentacle') ? 12 : 24,
+    });
 
     progress.report('preparing', 'Setting up actors and variables…');
     const limits = this.resources.limits;
@@ -1318,7 +1346,12 @@ export class ScummEngine implements AdventureEngine {
     if (this.video.active) return;
 
     if (this.roomGraphics) {
-      this.screen.drawRoom(this.roomGraphics, this.cameraLeft(), this.cameraTop());
+      this.screen.drawRoom(
+        this.roomGraphics,
+        this.cameraLeft(),
+        this.cameraTop(),
+        this.roomColourMap(),
+      );
     } else {
       this.screen.clear(0);
     }
@@ -1333,6 +1366,24 @@ export class ScummEngine implements AdventureEngine {
     this.drawPaintedStrings();
     this.drawText();
     this.drawBlastTexts();
+  }
+
+  /**
+   * The room colour map to composite the room through, or undefined for none.
+   *
+   * Only where the reference's decoders read `_roomPalette`: every room before
+   * v4, and a v4 room in sixteen colours. A 256-colour v4 room goes through
+   * the codec family v5 uses, which never consults it, so recolouring one here
+   * would be an effect the original does not have. Skipped while it is
+   * identity, which is every room that has not asked for it.
+   */
+  private roomColourMap(): Uint8Array | undefined {
+    if (this.scummVersion >= 5) return undefined;
+    const room = this.currentRoomData;
+    const sixteen = !!room && room.paletteColours > 0 && room.paletteColours <= 16;
+    if (this.scummVersion === 4 && !sixteen) return undefined;
+    for (let i = 0; i < 256; i++) if (this.roomColours[i] !== i) return this.roomColours;
+    return undefined;
   }
 
   /**
@@ -1445,6 +1496,12 @@ export class ScummEngine implements AdventureEngine {
     // 130, 132, 141, 144 and on up to 226, and each was a dead end.
     const resourceRoom = this.pseudoRoomResource(room);
     this.variables[this.vars.ROOM_RESOURCE] = resourceRoom;
+
+    // `startScene` puts both colour maps back before the new room's scripts
+    // run, so a shadow one room built does not darken the next.
+    this.shadowPalette.resetForRoom();
+    this.roomColours.set(identityColourMap());
+    this.palette.markDirty();
 
     if (room === 0) {
       this.currentRoomData = null;
@@ -2393,25 +2450,78 @@ export class ScummEngine implements AdventureEngine {
 
     if (step.cel === null) return;
     const cel = costume.cels[step.cel];
-    const pixels = decodeAkosCel(costume, step.cel);
-    if (!cel || !pixels) return;
+    const image = decodeAkosCel(costume, step.cel);
+    if (!cel || !image) return;
 
-    drawCel(this.screen, {} as unknown as Costume, cel, pixels, {
-      actorX: screenX,
-      actorY: screenY,
-      xMove: cel.relX,
-      yMove: cel.relY,
-      scaleX: scale,
-      scaleY: scale,
-      drawToRight: step.flip ?? direction !== 0,
-      palette,
-      roomGraphics: this.roomGraphics ?? undefined,
-      cameraX,
-      roomTop,
-      zPlane,
-      clipTop: this.screen.main.top,
-      clipBottom: this.screen.main.top + this.screen.main.height,
-    });
+    const drawToRight = step.flip ?? direction !== 0;
+    const shadow = this.actorShadowRule(actor, true);
+    const clipTop = this.screen.main.top;
+    const clipBottom = this.screen.main.top + this.screen.main.height;
+
+    if (image.layout === 'columns') {
+      drawCel(this.screen, {} as unknown as Costume, cel, image.pixels, {
+        actorX: screenX,
+        actorY: screenY,
+        xMove: cel.relX,
+        yMove: cel.relY,
+        scaleX: scale,
+        scaleY: scale,
+        drawToRight,
+        palette,
+        roomGraphics: this.roomGraphics ?? undefined,
+        cameraX,
+        roomTop,
+        zPlane,
+        clipTop,
+        clipBottom,
+        shadow,
+        bigScaleTable: true,
+      });
+      return;
+    }
+
+    // Codecs 5 and 16 go through the BOMP blitter, unscaled whatever the
+    // actor's scale — `paintCelCDATRLE` sets 255 in both axes and
+    // `paintCelMajMin` has no scaling step at all. A mirrored cel keeps its
+    // right-hand edge where an unmirrored one's left-hand edge would be.
+    const roomGraphics = this.roomGraphics;
+    drawBomp(
+      this.screen,
+      { pixels: image.pixels, width: cel.width, height: cel.height },
+      {
+        x: drawToRight ? screenX + cel.relX : screenX - cel.relX - cel.width + 1,
+        y: screenY + cel.relY,
+        mirror: !drawToRight,
+        shadow,
+        actorPalette: this.akosBompPalette(actor, costume, palette),
+        isMasked:
+          roomGraphics && zPlane > 0
+            ? (x, y) => roomGraphics.isMasked(zPlane, x + cameraX, y - roomTop)
+            : undefined,
+        clipTop,
+        clipBottom,
+      },
+    );
+  }
+
+  /**
+   * The colour map a BOMP-drawn AKOS cel goes through, or undefined for none.
+   *
+   * Those cels hold screen colours already, so as a rule nothing maps them.
+   * The exception is codec 5 in a costume whose `AKPL` has all 256 entries and
+   * an actor whose own palette overrides its first colour: then the whole
+   * actor-over-costume palette is applied, which is how such a costume is
+   * recoloured (`AkosRenderer::setPalette` sets `_useBompPalette` for exactly
+   * that case). Codec 16 never takes a palette (`paintCelMajMin`).
+   */
+  private akosBompPalette(
+    actor: Actor,
+    costume: AkosCostume,
+    palette: Uint8Array,
+  ): Uint8Array | undefined {
+    if (costume.codec !== AkosCodec.CdatRle) return undefined;
+    if (costume.palette.length !== 256 || actor.palette[0] === 0xff) return undefined;
+    return palette;
   }
 
   private getCostume(id: number): Costume | null {
@@ -3050,6 +3160,7 @@ export class ScummEngine implements AdventureEngine {
       if (!costume) continue;
 
       const palette = buildCostumePalette(costume, actor.palette);
+      const shadow = this.actorShadowRule(actor, false);
       const scale = actor.getScale(this.boxes);
       const zPlane = this.getActorZPlane(actor);
 
@@ -3083,6 +3194,7 @@ export class ScummEngine implements AdventureEngine {
           zPlane,
           clipTop: this.screen.main.top,
           clipBottom: this.screen.main.top + this.screen.main.height,
+          shadow,
         });
 
         xMove += cel.moveX;
@@ -4383,71 +4495,196 @@ export class ScummEngine implements AdventureEngine {
   }
 
   /**
+   * Sets up the shadow palette for the version being played.
+   *
+   * Three things depend on the version and nothing else, so they are decided
+   * once here rather than at every use:
+   *
+   * - how many tables there are (eight from v7, one before);
+   * - whether the palette upload reads the table (v3 and v4 only — the
+   *   reference's `_shadowPalRemap`, which v2 turns back off);
+   * - how colour cycling runs: v5 on rotates the colours and the table
+   *   follows them; v4 rotates nothing and rewrites the table instead; v3 does
+   *   not cycle at all (`cyclePalette` and its `GF_SMALL_HEADER` branch, and
+   *   `scummLoop_handleEffects`, which only calls it from v4).
+   *
+   * Sam & Max is the one game that starts every v6 build from identity, which
+   * is a property of the title rather than the version, so it is told apart by
+   * name here and nowhere else.
+   */
+  private installShadowPalette(version: number, gameId: string): void {
+    this.shadowPalette = new ShadowPalette(version);
+    this.shadowPaletteResetsBeforeBuild =
+      version === 6 && gameId.toLowerCase().startsWith('samnmax');
+
+    const table = this.shadowPalette.table;
+    this.palette.setOutputRemap(version === 3 || version === 4 ? table : null);
+    this.palette.onCycle =
+      version >= 5
+        ? (start, end, direction) => this.shadowPalette.cycle(start, end, direction)
+        : null;
+    this.palette.cycleStyle = version >= 5 ? 'rotate' : version === 4 ? 'table' : 'none';
+    this.palette.onTableCycle =
+      version === 4 ? (cycle) => this.shadowPalette.advanceSmallHeaderCycle(cycle) : null;
+  }
+
+  private shadowPaletteResetsBeforeBuild = false;
+
+  /**
    * v7's shadow palette, which is numbered.
    *
    * A separate entry point from `setShadowPalette` because the two versions
    * really do take different things. v6 builds one table and is told the
    * channel scales and the colour range. v7 keeps several tables and is told
    * which one first, so the same five numbers arrive one position later. The
-   * arguments are reordered here, in one place, rather than at the call site of
-   * each version.
-   *
-   * The slot is dropped along with everything else for now, for the reason
-   * `setShadowPalette` gives: no table is built, so there is nothing to build
-   * several of.
+   * arguments are reordered at the call site of each version; here, each form
+   * builds its own way — v7 scales the *current* palette and matches it with
+   * `remapPaletteColor`'s search, where v6 matches the room's palette with an
+   * older, unweighted one (`ShadowPalette.buildScaled` and `buildMatched`).
    */
-  /**
-   * v2-v4's "room colour": a palette remap slot, written as a colour and an
-   * index.
-   *
-   * v5 dropped the instruction, which is why it has no equivalent above. The
-   * remap table it writes into is not built here, so the effect is recorded
-   * and not applied — but the *operands are still read*, which is the part
-   * that matters: this form takes two words where v5's `roomOps` sub-opcode 2
-   * takes none, and a reader that skipped them would take the next
-   * instruction's bytes as its own.
-   */
-  setRoomColour(slot: number, colour: number): void {
-    this.warnOnce(
-      'setRoomColour',
-      `A script remapped room colour slot ${slot} to ${colour}. Palette remap ` +
-        `tables are not implemented, so the room draws in its own colours.`,
-    );
-  }
-
-  /** The same, for the shadow palette v2-v4 write one slot at a time. */
-  setRoomShadowColour(slot: number, colour: number): void {
-    this.warnOnce(
-      'setRoomShadowColour',
-      `A script wrote shadow palette slot ${slot} as colour ${colour}. Shadow ` +
-        `palettes are not implemented, so the room draws unshaded.`,
-    );
-  }
-
   setShadowPaletteSlot(
-    _slot: number,
+    slot: number,
     red: number,
     green: number,
     blue: number,
     startColor: number,
     endColor: number,
   ): void {
-    this.setShadowPalette(red, green, blue, startColor, endColor);
+    if (this.shadowPalette.slots === 1) {
+      // A v7 call reaching a single-table build. Slot 0 is the only table, so
+      // it gets the v7 construction; any other slot has nowhere to go.
+      if (slot !== 0) return this.reportShadowSlot(slot, startColor, endColor);
+    }
+    const built = this.shadowPalette.buildScaled(
+      this.palette,
+      slot,
+      red,
+      green,
+      blue,
+      startColor,
+      endColor,
+    );
+    if (!built) this.reportShadowSlot(slot, startColor, endColor);
   }
 
+  /** Says once that a shadow table was asked for that the original would reject. */
+  private reportShadowSlot(slot: number, startColor: number, endColor: number): void {
+    this.warnOnce(
+      'setShadowPaletteSlot',
+      `A script asked for shadow palette ${slot} over colours ${startColor}-${endColor}. ` +
+        `The original stops with an error on that; here the table is left as it was.`,
+    );
+  }
+
+  /**
+   * v2-v4's "room colour": a background colour drawn as another.
+   *
+   * v5 dropped the instruction, which is why it has no equivalent above. The
+   * *operands are read* whether or not anything could act on them, which is
+   * the part the script depends on: this form takes two words where v5's
+   * `roomOps` sub-opcode 2 takes none, and a reader that skipped them would
+   * take the next instruction's bytes as its own.
+   *
+   * Only the room is recoloured, when it is composited — actors and v4's
+   * 256-colour codecs never consult the table (see `roomColours`).
+   */
+  setRoomColour(slot: number, colour: number): void {
+    if (slot < 0 || slot > 255) return;
+    this.roomColours[slot] = colour & 0xff;
+  }
+
+  /**
+   * The same, for the shadow palette v3-v4 write one slot at a time.
+   *
+   * Those versions apply the table when the palette is uploaded, so writing a
+   * slot recolours every pixel of that index on the screen at the next frame,
+   * sprites and text included — which is the difference from room colour.
+   */
+  setRoomShadowColour(slot: number, colour: number): void {
+    this.shadowPalette.setEntry(slot, colour);
+    this.palette.markDirty();
+  }
+
+  /**
+   * v5 and v6's shadow palette, built by matching a scaled copy of the room's
+   * colours (`setShadowPalette` with seven arguments).
+   *
+   * `from` and `to` bound which colours get a shade; v5's `roomOps` and v6's
+   * kernel call 108 always pass the whole palette, and only kernel call 112
+   * narrows it.
+   */
   setShadowPalette(
-    _red: number,
-    _green: number,
-    _blue: number,
-    _start: number,
-    _end: number,
-    _from = 0,
-    _to = 256,
+    red: number,
+    green: number,
+    blue: number,
+    start: number,
+    end: number,
+    from = 0,
+    to = 256,
   ): void {
-    // Shadow palettes drive translucency effects that are not implemented;
-    // ignoring them draws the affected sprites opaque rather than not at all.
-    // v6 passes a colour range as well, which is read for the same reason the
-    // rest is: so a caller need not know which arguments are acted on.
+    this.shadowPalette.buildMatched(
+      this.palette,
+      red,
+      green,
+      blue,
+      start,
+      end,
+      from,
+      to,
+      this.shadowPaletteResetsBeforeBuild,
+    );
+    // v3/v4 read this table at upload time, so a rebuild there is a palette
+    // change; from v5 on it is read while drawing and nothing else is stale.
+    this.palette.markDirty();
+  }
+
+  /**
+   * The shadow rule an actor is drawn with, or undefined for none.
+   *
+   * A classic costume is only given a table from v5 on — before that colour 13
+   * is simply a colour. An AKOS costume draws plainly in mode 0 and shades in
+   * modes 1 and 3.
+   *
+   * Mode 2 has no implementation to follow. ScummVM's reference decoder stops
+   * with "shadowMode 2 not implemented", its optimised one (the one it ships)
+   * draws it as mode 0, and its BOMP blitter, which codecs 5 and 16 go
+   * through, errors on it — so it is drawn as mode 0 here, and said once.
+   */
+  private actorShadowRule(actor: Actor, akos: boolean): ShadowRule | undefined {
+    if (this.scummVersion < 5) return undefined;
+    if (akos && actor.shadowMode === 0) return undefined;
+    if (akos && actor.shadowMode !== 1 && actor.shadowMode !== 3) {
+      this.warnOnce(
+        'akosShadowMode',
+        `An actor was drawn with shadow mode ${actor.shadowMode}, which the original's AKOS ` +
+          `renderer has no implementation of; it was drawn as mode 0, as ScummVM's does.`,
+      );
+      return undefined;
+    }
+    return {
+      mode: actor.shadowMode,
+      table: this.shadowPalette.table,
+      akos,
+      onPastTable: (colour) => this.reportPastShadowTable('An actor', colour),
+    };
+  }
+
+  /**
+   * Says once that mode 3 asked for a numbered table this game does not keep.
+   *
+   * Mode 3 reads table `colour` for colours below 8, and before v7 there is
+   * one table of 256 entries (`readMAXS`). Colour 0's lookup lands in it and
+   * shades as normal; colours 1-7 land past it, where the original reads
+   * whatever memory follows the table. Nothing sensible reproduces that, so
+   * those pixels are painted as they are.
+   */
+  private reportPastShadowTable(what: string, colour: number): void {
+    this.warnOnce(
+      'shadowMode3PastTable',
+      `${what} was drawn with shadow mode 3 in colour ${colour}, which shades through ` +
+        `shadow table ${colour}; this game keeps only table 0, and the original reads past ` +
+        `its end there. Those pixels were drawn unshaded.`,
+    );
   }
 
   palManipulate(_a: number, _b: number, _c: number, _d = 0): void {
@@ -4644,61 +4881,50 @@ export class ScummEngine implements AdventureEngine {
       const image = this.blastObjectImage(entry);
       if (!image) continue;
 
-      const { pixels, width, height } = image;
-
-      // Scaling drops rows and columns rather than resampling them, and the
-      // survivors close up against the object's top-left corner — so a
-      // half-scale wheel spoke is half the size at the same position, not a
-      // sparse version of the full-size one.
+      // A scaled picture is never shaded: `drawBlastObject` throws the mode
+      // away when either axis is short of full, before `drawBomp` — which
+      // could shade a scaled picture perfectly well — ever sees it.
       const fullScale =
         entry.scaleX === BLAST_OBJECT_FULL_SCALE && entry.scaleY === BLAST_OBJECT_FULL_SCALE;
-      const columns = fullScale ? null : bompScaleMask(width, entry.scaleX);
-      const rows = fullScale ? null : bompScaleMask(height, entry.scaleY);
-
-      // A scaled picture is never shaded: the original throws the mode away
-      // when either axis is short of full, because the two effects share one
-      // blitter and the scaled path has no shadow step in it.
-      if (entry.mode !== 0 && fullScale) this.reportBlastObjectMode(entry.mode);
+      const mode = fullScale ? this.blastObjectShadowMode(entry.mode) : 0;
 
       // Screen coordinates, not room ones: a blast object is positioned
       // against the window rather than against the room behind it. Anything
       // off the edge is dropped by `putPixel`, which is what the original's
       // clip rectangle amounts to.
-      let destRow = 0;
-      for (let row = 0; row < height; row++) {
-        if (rows && !rows[row]) continue;
-
-        let destColumn = 0;
-        for (let column = 0; column < width; column++) {
-          if (columns && !columns[column]) continue;
-
-          const color = pixels[row * width + column];
-          if (color !== BLAST_OBJECT_TRANSPARENT) {
-            this.screen.putPixel(entry.x + destColumn, entry.y + destRow, color);
-          }
-          destColumn++;
-        }
-        destRow++;
-      }
+      drawBomp(this.screen, image, {
+        x: entry.x,
+        y: entry.y,
+        scaleX: entry.scaleX,
+        scaleY: entry.scaleY,
+        shadow: {
+          mode,
+          table: this.shadowPalette.table,
+          akos: true,
+          onPastTable: (colour) => this.reportPastShadowTable('An object', colour),
+        },
+      });
     }
   }
 
   /**
-   * Says once that a shadow mode was asked for and drawn without.
+   * The shadow mode a full-scale blast object is actually drawn with.
    *
-   * Mode 3 recolours the picture's darkest eight indices through a shadow
-   * palette, which nothing here builds yet — `setShadowPalette` records
-   * nothing, so there is no table to look the replacement up in. Drawing the
-   * artwork plainly is the closer of the two wrong answers: the picture is in
-   * the right place at the right size, and only its shading is missing.
+   * Modes 1 and 3 are the two `bompApplyShadow` implements besides plain
+   * drawing; any other is one it errors on, so it is drawn plainly and said
+   * once. Mode 3 in a game with one table is left to `shadePixel`, which
+   * shades colour 0 through it as the original does and reports the rest.
    */
-  private reportBlastObjectMode(mode: number): void {
-    if (this.reportedBlastObjectMode) return;
-    this.reportedBlastObjectMode = true;
-    this.warn(
-      `An object was queued to be drawn over the frame with shadow mode ${mode}, which needs a ` +
-        `shadow palette this build does not keep. It was drawn without shading.`,
-    );
+  private blastObjectShadowMode(mode: number): number {
+    if (mode === 0 || mode === 1 || mode === 3) return mode;
+    if (!this.reportedBlastObjectMode) {
+      this.reportedBlastObjectMode = true;
+      this.warn(
+        `An object was queued to be drawn over the frame with shadow mode ${mode}, which ` +
+          `the original does not implement either. It was drawn without shading.`,
+      );
+    }
+    return 0;
   }
 
   private reportedBlastObjectMode = false;
@@ -4719,7 +4945,16 @@ export class ScummEngine implements AdventureEngine {
     if (!room || !object?.image)
       return this.reportBlastObject(entry.objectId, 'is not in the room');
 
+    if (this.scummVersion === 8) {
+      // v8 keeps an object's code in `RMSC` and its image in `ROOM`, so the
+      // buffer its code is read from is the wrong one here — unless the object
+      // floated in from another room, whose `ROOM` it then carries.
+      const images = object.source === room.scriptData ? room.data : (object.source ?? room.data);
+      return this.blastObjectImageV8(entry, object.image, images);
+    }
+
     const data = this.objectBytes(object, room);
+
     // Asking for a state the object does not carry is not a mistake here: Sam
     // & Max queues numbers its objects do not have, and the original keeps a
     // fallback to the first image for it. That fallback is `findObjectImage`'s
@@ -4746,7 +4981,44 @@ export class ScummEngine implements AdventureEngine {
 
     const source = data.subarray(header + BOMP_HEADER_SIZE, bomp.dataOffset + bomp.dataSize);
     // Decoded with zeros written, because 255 is what a blast object treats as
-    // transparent — see `BLAST_OBJECT_TRANSPARENT`.
+    // transparent — see `BOMP_TRANSPARENT`.
+    return { pixels: decodeBomp(source, width, height, true), width, height };
+  }
+
+  /**
+   * v8's form of the same (`drawBlastObject`'s `_game.version == 8` branches).
+   *
+   * v8 reaches an image through `IMAG`/`WRAP`/`OFFS` rather than an `IMxx`, and
+   * the chunk the table names *is* the `BOMP`: its payload opens with a 32-bit
+   * width and height, and the runs follow directly — no two unused bytes and no
+   * padding words, as the earlier header has. There is no fallback to the first
+   * image either; the original asserts the one asked for exists.
+   *
+   * The chunk's tag is checked where the original does not look: a state that
+   * holds a room-style `SMAP` would otherwise be decoded as runs, which is
+   * noise rather than a picture.
+   */
+  private blastObjectImageV8(
+    entry: BlastObject,
+    image: RoomObjectImage,
+    data: Uint8Array,
+  ): { pixels: Uint8Array; width: number; height: number } | null {
+    const imageOffset = image.imageOffsets[entry.image - 1];
+    if (imageOffset === undefined || imageOffset + 16 > data.length) {
+      return this.reportBlastObject(entry.objectId, `has no image ${entry.image}`);
+    }
+    const bomp = readChunkHeader(data, imageOffset);
+    if (bomp.tag !== 'BOMP') {
+      return this.reportBlastObject(
+        entry.objectId,
+        `is not a blast object: its image ${entry.image} is ${bomp.tag}, not BOMP`,
+      );
+    }
+    const width = readU32LE(data, bomp.dataOffset);
+    const height = readU32LE(data, bomp.dataOffset + 4);
+    if (width === 0 || height === 0) return null;
+
+    const source = data.subarray(bomp.dataOffset + 8, bomp.dataOffset + bomp.dataSize);
     return { pixels: decodeBomp(source, width, height, true), width, height };
   }
 

@@ -3,6 +3,7 @@ import type { ScummEngine } from '../ScummEngine.js';
 import type { CutSceneLevel, CutSceneOverride } from '../script/ScriptState.js';
 import type { SavedScriptArray } from '../script/ScriptArrays.js';
 import type { SavedGameEnvelope } from '../AdventureEngine.js';
+import type { SavedImuse } from '../sound/SoundEngine.js';
 import { describeTarget, parseTarget, type Target } from '../../authoring/target.js';
 
 /**
@@ -165,6 +166,13 @@ export interface SavedGame extends SavedGameEnvelope {
    * two, and null for a game with no music playing.
    */
   musicState: { id: number; crossfadeSeconds: number } | null;
+  /**
+   * The iMUSE players themselves — position, loops, hooks, parts, fades — and
+   * the command queue and triggers above them, so a loaded game resumes the
+   * music where it was rather than at the top of the piece. Optional: a save
+   * from before it existed loads with the music state alone, as it always did.
+   */
+  imuse?: SavedImuse;
   savedAt: number;
   /** A label for the UI. Never used to identify the save. */
   name: string;
@@ -235,6 +243,18 @@ export interface SavedGame extends SavedGameEnvelope {
    */
   paintedStrings?: SavedPaintedString[];
 
+  /**
+   * The shadow palette table(s), as the reference saves `_shadowPalette`.
+   *
+   * A room builds its shadows from its entry script, which a restore does not
+   * run again — so without this a restored room came back with shadows that
+   * no longer shaded. Optional: a save written before it was kept restores
+   * with the table the room starts with, which is what it did before.
+   */
+  shadowPalette?: number[];
+  /** v2-v4's room colour map (`_roomPalette`), for the same reason. Optional too. */
+  roomColours?: number[];
+
   actors: SavedActor[];
   /**
    * Script arrays. Empty for v5, which has none, and the whole of a v6 game's
@@ -287,6 +307,7 @@ export function captureState(engine: ScummEngine, name = ''): SavedGame {
     gameId: engine.resources.game.id,
     languageBundle: engine.languageBundle?.source ?? null,
     musicState: engine.sound.sequencer.state ? { ...engine.sound.sequencer.state } : null,
+    imuse: engine.sound.saveImuse(),
     savedAt: Date.now(),
     name,
 
@@ -298,6 +319,8 @@ export function captureState(engine: ScummEngine, name = ''): SavedGame {
     objectClass: Array.from(engine.objectClass),
     objectNames: [...engine.objectNameOverrides.entries()],
     inventory: [...engine.inventory],
+    shadowPalette: engine.shadowPalette.save(),
+    roomColours: Array.from(engine.roomColours),
     strings: [...engine.strings.entries()],
 
     camera: { ...engine.camera },
@@ -471,6 +494,7 @@ export function restoreState(engine: ScummEngine, saved: SavedGame): void {
   // because a crossfade into the music that was already playing is a fade from
   // silence — audible, and not what the player left.
   engine.sound.sequencer.restore(saved.musicState ?? null);
+  engine.sound.restoreImuse(saved.imuse);
 
   engine.variables.set(saved.variables.slice(0, engine.variables.length));
   engine.bitVariables.set(saved.bitVariables.slice(0, engine.bitVariables.length));
@@ -507,6 +531,11 @@ export function restoreState(engine: ScummEngine, saved: SavedGame): void {
       Object.assign(engine.verbs.getOrCreate(savedVerb.id), savedVerb);
   }
   if (saved.paintedStrings) engine.restorePaintedStrings(saved.paintedStrings);
+
+  // After the room too, since entering one resets both colour maps.
+  engine.shadowPalette.restore(saved.shadowPalette);
+  if (saved.roomColours?.length === 256) engine.roomColours.set(saved.roomColours);
+  engine.palette.markDirty();
 
   for (const savedActor of saved.actors) {
     const actor = engine.actors[savedActor.number];

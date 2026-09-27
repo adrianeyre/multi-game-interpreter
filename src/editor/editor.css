@@ -2741,6 +2741,13 @@ h5 {
     -6px 0;
 }
 
+/* A zoomed picture scrolls inside its frame rather than pushing the panel
+   off the screen: a 640 by 480 background at four times is 2560 pixels wide,
+   and the controls under it still have to be reachable. */
+.sword-picture-zoomable {
+  max-height: 70vh;
+}
+
 .sword-frame-strip {
   display: flex;
   flex-wrap: wrap;

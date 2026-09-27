@@ -102,7 +102,13 @@ export async function readSciGameFolder(
   }
 
   const present = new Set(source.list().map((file) => baseName(file).toUpperCase()));
-  const carriedNames = CARRIED_VOLUMES.filter((volume) => present.has(volume));
+  // A numbered-disc install's audio is each disc's own `RESAUD.00n` and
+  // `RESSFX.00n`, carried the same way: an export that left them behind would
+  // be a game with every disc's speech missing.
+  const carriedNames = [
+    ...CARRIED_VOLUMES.filter((volume) => present.has(volume)),
+    ...[...detected.game.layout.discAudioFiles.keys()].sort(),
+  ];
 
   return { name, source, game: detected.game, resources: detected.resources, carriedNames };
 }

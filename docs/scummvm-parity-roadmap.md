@@ -29,7 +29,8 @@ answer for.
 | Lines of C++ in them                                             | 6,052,980 |
 | Lines corresponding to the six families implemented here         | 547,180   |
 | Lines for the two added since (`sword1` 33,380, `sword2` 25,968) | 59,348    |
-| Lines of TypeScript in `src/` today                              | 114,766   |
+| Lines of TypeScript in `src/` when the six were measured         | 114,766   |
+| Lines of TypeScript in `src/` today, with all eight families     | 199,565   |
 
 **The ratio is the useful part, and it is not 53:1.** This project is not a
 port: `README.md` says it is written "from scratch against the formats, using
@@ -349,11 +350,11 @@ The scope is now the famous bespoke engines and not the number ScummVM quotes,
 so the four generic interpreters are declined and the queue above is ten
 engines rather than a hundred and twenty. That is still more work than the six
 already here, and the recommendation this map makes is unchanged by the
-decision: **finishing the existing six comes first.** The subsystems standing
+decision: **finishing the existing eight comes first.** The subsystems standing
 between them and a game somebody can play through are named in
 [`processes/verifying-version-support.md`](processes/verifying-version-support.md)
 and [`released-games.md`](released-games.md) rather than guessed at — SCI stops
 in one place for every game it reads, Sky reaches a room and no further — at
 the game's own 80ms cycle now rather than at 200ms, which had it walking at 40%
-speed — AGOS implements the common opcodes and names the rest — and each of those is a
+speed — AGOS runs every opcode its reference installs and plays through nothing yet — and each of those is a
 smaller job than a new family for games a player already recognises.

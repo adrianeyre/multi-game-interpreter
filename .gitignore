@@ -148,7 +148,7 @@ vite.config.ts.timestamp-*
 # scumm-web
 dist-web/
 coverage/
-public/games/*/
+public/games/*
 !public/games/README.md
 
 .scratch/

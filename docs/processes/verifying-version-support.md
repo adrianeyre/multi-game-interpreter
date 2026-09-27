@@ -230,7 +230,11 @@ One caveat recorded rather than counted: Day of the Tentacle logs `iMUSE
 command 255 (scope 255) is not implemented` and `iMUSE command 1 (scope 1) is
 not implemented` while booting. Those are music transitions, they do not stop
 the game reaching a room, and the sweep of 3,044 handlers found nothing — so
-they are a caveat and not a play-blocking finding.
+they are a caveat and not a play-blocking finding. **Since then both are
+served**: "command 255" is `soundKludge`'s -1, "process the queue now", which
+has nothing left to do because commands run as they arrive, and scope-1
+commands go to the live iMUSE player (`ImusePlayer.ts`, `imuse.ts`). Neither
+line is logged any more; that has not been re-measured against the demo here.
 
 ## The Virtual Theatre families — the one place CI can check a game
 
@@ -266,8 +270,10 @@ than the SCUMM sweep is anywhere, because these formats check themselves:
   and — once a room is reached — clicks a hotspot the way a player would.
   Current state: **reaches `room`** on the CD release, and over 3,000 ticks runs
   **11,453 scripts**, the world unchanged for 2,998 of them. Reaching a room is
-  not playing through one: **clicking the floor stops on the get-to chain**
-  (`fnNormalMouse`, then `fnSaveCoods`), which is walking (#256) — the first
+  not playing through one. This bullet used to say clicking the floor stopped
+  on the get-to chain (`fnNormalMouse`, then `fnSaveCoods`); both are handled
+  now and **a floor click walks Foster**, in a straight line rather than on a
+  walk grid (#256, ADR 0033) — the first
   thing a player cannot do, and now the harness names it rather than absorbing
   the click. It distinguishes a resting room from a stall: the status line says
   the world has not changed for N ticks, which is a different complaint from a
@@ -466,8 +472,9 @@ or four of them does not go looking for a regression.
   floppy reaches `loaded`; Sky's demo and floppy are `refused` and Lure's demo
   has no in-scope data to run. `last-screen` means the game's ending with the
   player in control — the only rung that supports `Completable` — and the first
-  step between a room and it is walking, which stops on the get-to chain
-  (`fnNormalMouse`, `fnSaveCoods`), #256.
+  step between a room and it is walking on the screen's own grid: Foster walks
+  now, in a straight line, because which grid a screen uses is refused under
+  ADR 0033 (#256).
 - **Decompilation, for either family.** Unchanged, deliberately, and gated
   behind an ADR of its own per ADR 0025.
 - **Export, for either family.** Refused by name for both.
@@ -2047,6 +2054,14 @@ in the corpus has zero V56 Views, and every SCI1.1-and-later game is entirely
 V56.** So the refusal never touches the Versions whose editing issues depend on
 it.
 
+**Since then the V56 refusal is narrower.** A PNG imported over a V56 cel is
+re-encoded and patched in place when the new body fits in the bytes the old one
+occupied — SCI32's per-row table rewritten when the record has one — and every
+patch is re-read and compared pixel for pixel (`sciViewCel.ts`). A body that
+does not fit, a cel whose streams another record shares, and a mirrored cel are
+still refused by name, with the sizes in the sentence. The 603 above was
+measured before that and has not been re-run against the demos.
+
 **There was no font reader before this.** The format was derived from the games
 and is self-checking — header, offset table and the sum of every character's
 record add up to the resource length exactly, 6 + 256 + 1,486 = 1,748 for
@@ -2145,12 +2160,16 @@ a release's real gap can differ from the row below.
 
 | Version                            | slots           | named | implemented | constant | unused stub | missing |
 | ---------------------------------- | --------------- | ----- | ----------- | -------- | ----------- | ------- |
-| SCI0 early, SCI0 late, SCI01       | 110 / 110 / 139 | 112   | 76          | 30       | 6           | 0       |
-| SCI1 EGA-only, early, middle, late | 139             | 137   | 86          | 40       | 11          | 0       |
-| SCI1.1                             | 139             | 137   | 86          | 39       | 11          | 1       |
-| SCI2                               | 160             | 150   | 80          | 28       | 13          | 29      |
-| SCI2.1 early, middle, late         | 162             | 123   | 61          | 22       | 11          | 29      |
-| SCI3                               | 162             | 122   | 60          | 21       | 11          | 30      |
+| SCI0 early, SCI0 late, SCI01       | 110 / 110 / 139 | 112   | 102         | 4        | 6           | 0       |
+| SCI1 EGA-only, early, middle, late | 139             | 137   | 118         | 7        | 12          | 0       |
+| SCI1.1                             | 139             | 137   | 118         | 7        | 12          | 0       |
+| SCI2                               | 160             | 150   | 121         | 9        | 20          | 0       |
+| SCI2.1 early, middle, late         | 162             | 123   | 98          | 8        | 17          | 0       |
+| SCI3                               | 162             | 122   | 96          | 9        | 17          | 0       |
+
+**Every missing column now reads zero, at every Version.** The narrative below
+records how the table got here, and keeps the figures each paragraph was written
+against; where a paragraph's figure is out of date it says so.
 
 **The count this replaces was wrong in four ways, and all four were artefacts of
 measuring outside the code.** It was taken by matching handler keys against
@@ -2166,14 +2185,20 @@ each renumber a slot and so have gaps of their own.
 
 **A fifth way, which moving the count inside the code did not fix.** The
 "implemented" column above used to read 120 for SCI1, read 72 the day the
-constant column was introduced, and reads 86 today; nothing was deleted to make
-the first of those moves happen, and nothing was faked to make the second. The
+constant column was introduced, read 86 when this section was written, read
+92 before the constant column was reviewed name by name, and reads 118 today;
+nothing was deleted to make the first of those moves happen, and nothing was
+faked to make the second. The
 old column counted a _key_ in `SCI_KERNEL`, not a behaviour, and forty handlers
-at SCI1 still answer the same value whatever a game passes them. `Said` is
-`() => int(0)`. So are `Graph` and `Palette`, and `AvoidPath`, `InitBresen`,
-`DoBresen` and the four menu calls return `NULL_REG` the same way. Each was
-counted beside `Format` and `DrawPic`. `DoSound`, `Parse`, `SaveGame` and
-`RestoreGame` were on that list when the column was first published and have
+at SCI1 answered the same value whatever a game passed them — seven still do,
+each one ScummVM also answers with a constant (`FlushResources`, `HaveMouse`,
+`Joystick`, `SetDebug`, `SetQuitStr`, `SetVideoMode`, `ValidPath`). `Said` was
+`() => int(0)` and has since gained a real said-spec matcher (`sciSaid.ts`).
+`Graph`, `Palette`, `AvoidPath`, `InitBresen`, `DoBresen` and the menu calls
+were constants beside them, each counted beside `Format` and `DrawPic`; all of
+them have behaviour now. `DoSound`, `Parse`, `SaveGame`,
+`RestoreGame`, `Said`, `SetSynonyms`, `DirLoop`, `GetSaveFiles` and
+`CheckSaveGame` were on that list when the column was first published and have
 each since left it by gaining behaviour, which is the only way out.
 
 What that made possible is the thing this table exists to refuse. Under the old
@@ -2190,18 +2215,24 @@ reads no argument and touches nothing goes in the column.
 exactly that set, so a call that gains behaviour has to leave the list and one
 that loses it has to join, and neither is settled by argument.
 
-**It is not a defect list, and saying so is not a hedge.** Some of the forty are
-finished: `SetVideoMode` has a VGA planar mode to leave that no
+**It is not a defect list, and saying so is not a hedge.** Some of the forty
+were finished even then, and the seven left are the finished ones:
+`SetVideoMode` has a VGA planar mode to leave that no
 renderer here has, `CanBeHere` and `CantBeHere` answer permissively on purpose
 because a refusal spins `findPosn` — King's Quest IV's throne room made 385,000
 of those calls — `HaveMouse` says there is a mouse, and `UnLoad`, `Lock` and
 `FlushResources` manage a resource cache this interpreter does not keep. Others
-are whole surfaces with nothing behind them. Sorting those apart is a judgement
+were whole surfaces with nothing behind them. Sorting those apart is a judgement
 per call and is deliberately not made in the count: the column reports what was
-measured, and a call leaves it by gaining behaviour.
+measured, and a call leaves it by gaining behaviour. (Since then `CanBeHere`,
+`CantBeHere`, `UnLoad` and `Lock`, where a Version names them, have gained
+behaviour too, after the column
+was reviewed against what ScummVM does with each.)
 
-**Eleven calls are the unused stub**, which is a different kind of nothing and
-keeps its own column: Sierra's own debugger's surface — `InspectObj`,
+**Eleven calls were the unused stub when this was written** — twelve at SCI1
+now, `DbugStr` having joined them as ScummVM's `MAP_DUMMY` — which is a
+different kind of nothing and keeps its own column: Sierra's own debugger's
+surface — `InspectObj`,
 `ShowSends`, `ShowObjs`, `ShowFree`, `StackUsage`, `Profiler`, `Record`,
 `PlayBack` — plus `ATan`, `ShiftScreen` and `ListOps`, which ScummVM's
 `kernel_tables.h` maps to `MAP_DUMMY` with the note "never called?". That is a
@@ -2213,7 +2244,7 @@ nuisance: either its Version is wrong or that list is.
 once.** `SciEngine.callKernel` returns null, `PMachine`'s `callk` logs
 `describeUnknownKernel` the first time it sees each number and then writes
 `NULL_REG` into the accumulator and carries on. That is a decision worth keeping
-now that the SCI16 gap is four calls wide rather than twenty-three: halting would
+now that the SCI16 gap is zero calls wide rather than twenty-three: halting would
 lose every later finding in the same run, and the SCI32 trace recorded above —
 where Kernel 10's null became a receiver and the game stopped at `send to 0:0`
 sixty instructions later — is the reporting doing its job rather than an argument
@@ -2277,6 +2308,11 @@ answered a fallback would close the count and stop the engine reporting the gap,
 which is the trade this table exists to refuse — and which the constant column
 now makes visible rather than leaving to good intentions.
 
+That paragraph is kept as the plan it was. The hooks were written — `IsItSkip`,
+`AssertPalette`, `TextFonts`, `ResCheck` and the file calls all have behaviour
+in `SciKernel.ts` now — which is why every SCI0 and SCI1 row above reads zero
+missing.
+
 **`MergePoly` is the other name that left the missing list, and it took two
 attempts to get there.** It extends one obstacle polygon to swallow the ones it
 overlaps, so a pathfinder can route around the union rather than around each
@@ -2296,7 +2332,8 @@ the identical claim would have excluded `Intersections`, which was written in
 the same run and whose answer nothing reads either. A call that answers
 correctly and is not yet consumed is still a call this engine answers. The
 handler says so in its own comment: it closes a name and moves no pixel, and
-`AvoidPath` is the next thing to write.
+`AvoidPath` is the next thing to write. (It has since been written, and has
+behaviour in `SciKernel.ts`.)
 
 Transcribed from ScummVM's `kMergePoly` and `mergeSinglePolygon`
 (`engines/sci/engine/kpathing.cpp`, fetched 2026-09-12), which carries the
@@ -2337,9 +2374,32 @@ named at SCI2 and SCI2.1 as well as at SCI16, so writing it for SCI16 took those
 rows from 59 to 58 without any SCI32 work being done. SCI3 does not name the
 call, which is why SCI3 is the row still reading 59. What the constant column
 adds for SCI32 is that its implemented figure fell with everyone else's — SCI2
-reads 55 where it read 87 — so the published gap is now 58 missing beside 33
+reads 55 where it read 87 — so the published gap was then 58 missing beside 33
 answered with a constant, and the distance to a playable SCI32 is the larger of
 those two numbers rather than the smaller.
+
+**Those figures have since moved, by work rather than by recounting.** The
+SCI32 list helpers (`ListAt` through `ListAllTrue`), the line calls, the save
+and disc names, `GetConfig`, `GetSierraProfileInt`, `PrintDebug` and
+`GetWindowsOption` were written, and six names ScummVM's own table maps to a
+dummy (`AddPolygon`, `UpdatePolygon`, `DeletePolygon`, `InvertRect`,
+`LoadChunk`, `TestPoly`) moved to the unused column. SCI2 now reads 4 missing
+beside 24 constant, SCI2.1 8 beside 20, and SCI3 9 beside 21 — the table above
+is the current one. What is left is surfaces with nothing behind them yet:
+`InputText`, `MessageBox`, `MovePlaneItems`, `ScrollWindow`, `SetHotRectangles`,
+`CelLink`, `MorphOn`, `WinDLL`, `WinExec` and `WebConnect`.
+
+**Since then that list is empty too.** `InputText` draws its field,
+`MessageBox`, `MovePlaneItems`, `ScrollWindow`, `SetHotRectangles`, `CelLink`,
+`MorphOn` and `SetGamma` have behaviour, and `WinDLL` answers Hoyle 5's poker
+DLL (`sciHoyle5Poker.ts`), and SCI3's `WebConnect` has behaviour;
+`RepaintPlane` and `WinExec` went to the unused column, because ScummVM answers
+both with nothing. So SCI2 reads 0
+missing beside 9 constant, SCI2.1 0 beside 8 and SCI3 0 beside 9 — the table
+at the head of this section. Every remaining constant is one ScummVM also
+answers with a constant, named with its reason beside `SCI_CONSTANT_KERNEL_NAMES`.
+Two limits are stated on the handlers rather than counted: `Platform` always
+answers DOS, and `DoAudio`'s CD audio and SCI32 pan are not heard.
 
 ### Rendering, judged by eye
 

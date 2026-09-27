@@ -119,9 +119,9 @@ if (flags.includes('--kernel-coverage')) {
   console.log(
     '  note  "unused" is answered by the stub for the calls Sierra shipped and no retail\n' +
       '        game makes. "constant" is a handler that answers the same value whatever a\n' +
-      '        game passes it — some finished, like SetVideoMode; some whole surfaces with\n' +
-      '        nothing behind them yet, like Said and Graph. Neither column is an\n' +
-      '        implementation and neither is ever counted as one.',
+      '        game passes it, and every one left is a call ScummVM also answers with a\n' +
+      '        constant — SetVideoMode, ValidPath, HaveMouse, the MAP_EMPTY calls. Neither\n' +
+      '        column is an implementation and neither is ever counted as one.',
   );
   process.exit(stray.length === 0 ? 0 : 1);
 }

@@ -109,6 +109,18 @@ export function vocabularyIndex(words: readonly SciWord[]): Map<string, SciWord>
 }
 
 /**
+ * One word of a parsed line: its group, and the classes it may be read as.
+ *
+ * The class travels with the group because `Said` needs to know which part of
+ * the sentence a word is — a verb, the thing acted on, a word modifying one of
+ * those — and a bare group number cannot say (`script/sciSaid.ts`).
+ */
+export interface SciParsedWord {
+  group: number;
+  wordClass: number;
+}
+
+/**
  * Parses a typed line into the groups a `said` will match.
  *
  * SCI's parse is not a syntax tree here: a `said` spec matches a sequence of
@@ -121,9 +133,10 @@ export function vocabularyIndex(words: readonly SciWord[]): Map<string, SciWord>
 export function parseSciLine(
   line: string,
   index: Map<string, SciWord>,
-): { groups: number[]; unknown: string[] } {
+): { groups: number[]; unknown: string[]; words: SciParsedWord[] } {
   const groups: number[] = [];
   const unknown: string[] = [];
+  const words: SciParsedWord[] = [];
 
   for (const raw of line.toLowerCase().split(/[^a-z0-9']+/)) {
     if (raw === '') continue;
@@ -136,8 +149,9 @@ export function parseSciLine(
     // rather than by the game's scripts.
     if (word.wordClass & SCI_WORD_CLASS.article) continue;
     groups.push(word.group);
+    words.push({ group: word.group, wordClass: word.wordClass });
   }
-  return { groups, unknown };
+  return { groups, unknown, words };
 }
 
 /**

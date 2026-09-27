@@ -179,7 +179,14 @@ export class Actor {
 
   animProgress = 0;
   animSpeed = 0;
-  /** Shadow palette selected by actorOps 23. Recorded, not yet rendered. */
+  /**
+   * How the actor shades what is behind it (actorOps 23, v6 kernel 111).
+   *
+   * Read by the renderer through `shadePixel`: bit 0x20 of a classic costume
+   * shades every pixel, AKOS mode 1 shades colour 13 and mode 3 picks one of
+   * v7's numbered tables. AKOS mode 2 is drawn plainly — the reference does
+   * not implement it either — and says so once.
+   */
   shadowMode = 0;
   /** Set while the actor is speaking, so the talk animation keeps running. */
   talking = false;

@@ -249,12 +249,68 @@ export class SciInput implements EngineInput {
   }
 
   /**
+   * SCI2.1's hot rectangles: screen regions that report the pointer entering
+   * and leaving them.
+   *
+   * `EventManager::checkHotRectangles` (`engines/sci/event.cpp`, fetched
+   * 2026-09-27). Checked each time the scripts ask for an event, which is
+   * when ScummVM's own event poll checks them: moving into a region puts a
+   * `hotRectangle` event at the **front** of the queue with the region's
+   * index as its message, and moving out of every region puts one with -1.
+   * Phantasmagoria's chase scene is built on this and nothing else.
+   *
+   * In script coordinates, which is what the rectangles are given in and
+   * what `mouseX` and `mouseY` already are.
+   */
+  private hotRectangles: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+  private hotRectanglesActive = false;
+  private activeHotRectangle = -1;
+
+  setHotRectanglesActive(active: boolean): void {
+    this.hotRectanglesActive = active;
+  }
+
+  /** Right and bottom are exclusive here, as `Common::Rect` holds them. */
+  setHotRectangles(
+    rects: Array<{ left: number; top: number; right: number; bottom: number }>,
+  ): void {
+    this.hotRectangles = rects.map((rect) => ({ ...rect }));
+    this.activeHotRectangle = -1;
+  }
+
+  private checkHotRectangles(): void {
+    const last = this.activeHotRectangle;
+    const x = this.mouseX;
+    const y = this.mouseY;
+    const index = this.hotRectangles.findIndex(
+      (rect) => x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom,
+    );
+    this.activeHotRectangle = index;
+    const report = (message: number): void => {
+      this.queue.unshift({
+        type: SCI_EVENT.hotRectangle,
+        message,
+        modifiers: 0,
+        x,
+        y,
+        time: Date.now() - this.started,
+      });
+    };
+    // Entering a region reports it; leaving one reports -1 — and moving
+    // straight from one region into another does both, the -1 first, which
+    // is the order ScummVM's two `push_front`s leave them in.
+    if (index >= 0 && index !== last) report(index);
+    if (last !== -1 && last !== index) report(-1);
+  }
+
+  /**
    * The oldest event matching `mask`, removed from the queue.
    *
    * `SCI_EVENT.peek` leaves it there, which is how a script tests for an event
    * it is not ready to handle.
    */
   next(mask: number): SciEvent | null {
+    if (this.hotRectanglesActive) this.checkHotRectangles();
     const peek = (mask & SCI_EVENT.peek) !== 0;
     const wanted = mask & ~SCI_EVENT.peek;
     for (let i = 0; i < this.queue.length; i++) {

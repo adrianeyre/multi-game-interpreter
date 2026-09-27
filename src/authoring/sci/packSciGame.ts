@@ -33,6 +33,12 @@
  * ceiling: 64MB of resources at SCI0 and SCI1 late, 256MB at SCI1 middle, past
  * which this refuses rather than writing an offset the map cannot address.
  *
+ * **A numbered-disc install is the exception**, and keeps its discs: given
+ * `discs`, each `RESMAP.00n` and `RESSCI.00n` is written with the resources
+ * that disc listed (`packSciDiscs`), because on such an install each disc's
+ * audio maps are its own tables and collapsing them into one map would keep
+ * one disc's and lose the rest.
+ *
  * **It writes every resource uncompressed** (method 0). Sierra's own Volumes
  * use LZW and DCL and `sciCompression.ts` reads both; nothing here writes
  * either, and an uncompressed resource is legal for every reader — ScummVM's
@@ -42,11 +48,15 @@
  * Project holds, so a difference in a round trip is a difference in the writer
  * rather than in a compressor.
  *
- * **Carried Volumes are copied, not rebuilt.** `exportSciGame`'s
- * `carriedVolumes` names them and #227 is the reason: a game's audio and video
- * are played rather than held (`CONTEXT.md`), so there is nothing in a Project
- * that could rebuild them. They arrive here as bytes already read from the
- * folder the author re-supplied (ADR 0010) and go out byte for byte.
+ * **Carried Volumes are copied, not rebuilt — unless a recording in one was
+ * replaced.** `exportSciGame`'s `carriedVolumes` names them: a game's audio and
+ * video are played rather than held (`CONTEXT.md`), so they arrive here as
+ * bytes already read from the folder the author re-supplied (ADR 0010) and go
+ * out byte for byte. The exception is #227's: when `audio` names a replaced
+ * recording, `rebuildSciAudio` substitutes it — into the resource map for an
+ * `audio` resource, into the audio Volume and the base audio map for a bulk
+ * one — before anything is packed, so the map this packer writes carries the
+ * repointed audio map and the Volume carried beside it is the rebuilt one.
  */
 
 import { headerShapeFor, type HeaderShape } from '../../engine/sci/resource/SciResources.js';
@@ -56,6 +66,13 @@ import {
   type SciMapVersion,
 } from '../../engine/sci/resource/resourceMap.js';
 import type { SciLayout } from '../../engine/sci/resource/sciDetect.js';
+import type { SciResources } from '../../engine/sci/resource/SciResources.js';
+import {
+  rebuildSciAudio,
+  rebuildSciDiscAudio,
+  type SciAudioDisc,
+  type SciAudioReplacement,
+} from './sciAudioVolume.js';
 import {
   SCI_RESOURCE_TYPES,
   type SciResourceType,
@@ -96,6 +113,29 @@ export interface SciPackOptions {
   readonly layout?: SciLayout;
   /** Volumes carried through byte for byte, already read from the folder. */
   readonly carried?: readonly SciPackedFile[];
+  /**
+   * Recordings an author replaced, to be written into the install.
+   *
+   * Absent or empty for an unedited export, which then carries every audio
+   * Volume through exactly as it arrived.
+   */
+  readonly audio?: readonly SciAudioReplacement[];
+  /**
+   * The discs of a numbered-disc install, each with the resources its own map
+   * listed and its own audio maps (`sciPackDiscs`).
+   *
+   * Given, the install is packed as the discs it arrived on — a `RESMAP.00n`
+   * and `RESSCI.00n` per disc — rather than collapsed into one map, and a
+   * replaced recording is written into its own disc's audio Volume and maps
+   * (`rebuildSciDiscAudio`). Absent or empty for every other install.
+   */
+  readonly discs?: readonly SciAudioDisc[];
+  /**
+   * ScummVM's `_multiDiscAudio` for the install the discs came from:
+   * whether each disc's audio maps are its own. Defaults to the layout's
+   * `multiDiscAudio`; only read beside `discs`.
+   */
+  readonly multiDiscAudio?: boolean;
 }
 
 export interface SciPackResult {
@@ -107,8 +147,14 @@ export interface SciPackResult {
   readonly refused: readonly string[];
   /** Names copied through rather than rebuilt. */
   readonly carried: readonly string[];
+  /** Carried Volumes rebuilt because a recording in one was replaced. */
+  readonly rebuiltVolumes: readonly string[];
+  /** One sentence per replaced recording this install carries. */
+  readonly replacedAudio: readonly string[];
   /** How many resources went into the Volume. */
   readonly resourceCount: number;
+  /** For a numbered-disc install, every map and Volume written, disc by disc. */
+  readonly discFiles?: readonly string[];
   /** How large the Volume is, which is the number compression would change. */
   readonly volumeBytes: number;
 }
@@ -460,8 +506,17 @@ export function packSciGame(
   options: SciPackOptions,
 ): SciPackResult {
   const { mapVersion } = options;
+  if (options.discs && options.discs.length > 0) return packSciDiscs(resources, options);
   const refused: string[] = [];
-  const packable = packableFrom(resources, refused);
+
+  // Replaced recordings first, because one of them may rewrite a resource (the
+  // base audio map, or an `audio` resource) that is about to be packed.
+  const audio = rebuildSciAudio(resources, options.carried ?? [], options.audio ?? [], {
+    sci32: headerShapeFor(mapVersion) === 'sci32',
+  });
+  refused.push(...audio.refused);
+
+  const packable = packableFrom(audio.resources, refused);
   const { mapFile, volumeFile } = namesFor(mapVersion, options.layout);
   const volumeNumber = volumeNumberFor(mapVersion);
 
@@ -510,7 +565,7 @@ export function packSciGame(
     );
   }
 
-  const carried = options.carried ?? [];
+  const carried = audio.carried;
   const files =
     refused.length > 0
       ? []
@@ -521,8 +576,176 @@ export function packSciGame(
     mapFile,
     volumeFile,
     refused,
-    carried: carried.map((file) => file.name),
+    carried: carried
+      .map((file) => file.name)
+      .filter((name) => !audio.rebuiltVolumes.includes(name)),
+    rebuiltVolumes: audio.rebuiltVolumes,
+    replacedAudio: audio.replaced,
     resourceCount: packable.length,
     volumeBytes: volume.length,
   };
+}
+
+/**
+ * Asks whether a written map reads back as the structure it was written in,
+ * and says why not by name. `packSciGame` gives the reasoning; this is the
+ * same check for each disc of a numbered install.
+ */
+function readBackRefusal(
+  map: Uint8Array,
+  mapVersion: SciMapVersion,
+  volumeNumber: number,
+  what: string,
+): string | null {
+  const written = detectMapVersion(map, (volume) => volume === volumeNumber);
+  if (written === mapVersion) return null;
+  const widths = written !== null && isDirectoryMap(mapVersion) && isDirectoryMap(written);
+  return (
+    `${what}: a ${mapVersion} map of these resources reads back as ` +
+    `${written ?? 'no structure this project recognises'}, so the packed install would serve ` +
+    `the wrong bytes` +
+    (widths
+      ? ': every one of its entry blocks is a multiple of five, which leaves the entry width ' +
+        'ambiguous'
+      : '')
+  );
+}
+
+/**
+ * A numbered-disc install packed back as its discs.
+ *
+ * **Each disc gets the resources its own map listed**, from the Project —
+ * except a copy a later disc shadows, which the interpreter never reads and
+ * which goes back as it arrived (`SciAudioDisc.shadowed`); the edit lands on
+ * the disc whose copy is the one played. A resource no disc
+ * listed — one this editor added — goes on the lowest disc, which is as
+ * reachable as any: the interpreter reads every disc's map into one table.
+ * **Audio maps are the exception** when the install's audio is per disc
+ * (`multiDiscAudio`): the same map number on two discs is two tables, each
+ * addressing its own disc's Volume, so each disc gets its own copy back — as
+ * it arrived, or as `rebuildSciDiscAudio` rewrote it for a replaced
+ * recording on that disc.
+ *
+ * The names are the discs' own (`RESMAP.00n`, `RESSCI.00n`), and every carried
+ * Volume but a rebuilt one is copied byte for byte.
+ */
+function packSciDiscs(
+  resources: ReadonlyMap<string, Uint8Array>,
+  options: SciPackOptions,
+): SciPackResult {
+  const { mapVersion } = options;
+  const discs = [...(options.discs ?? [])].sort((a, b) => a.number - b.number);
+  const perDiscAudio = (options.multiDiscAudio ?? options.layout?.multiDiscAudio) === true;
+  const sci32 = headerShapeFor(mapVersion) === 'sci32';
+  const refused: string[] = [];
+
+  const audio = perDiscAudio
+    ? rebuildSciDiscAudio(resources, discs, options.carried ?? [], options.audio ?? [], { sci32 })
+    : {
+        ...rebuildSciAudio(resources, options.carried ?? [], options.audio ?? [], { sci32 }),
+        discMaps: null,
+      };
+  refused.push(...audio.refused);
+
+  const listed = new Set(discs.flatMap((disc) => disc.keys));
+  const unlisted = [...audio.resources.keys()].filter((key) => !listed.has(key));
+
+  const files: SciPackedFile[] = [];
+  const discFiles: string[] = [];
+  let volumeBytes = 0;
+  const named = new Map(
+    (options.layout?.discs ?? []).map((disc) => [
+      disc.number,
+      { mapFile: baseName(disc.mapFile), volumeFile: baseName(disc.volumeFile) },
+    ]),
+  );
+
+  for (const [index, disc] of discs.entries()) {
+    const own = new Map<string, Uint8Array>();
+    const keys = index === 0 ? [...disc.keys, ...unlisted] : disc.keys;
+    for (const key of keys) {
+      const isMap = key.startsWith('map:');
+      const bytes =
+        perDiscAudio && isMap
+          ? (audio.discMaps?.get(disc.number)?.get(Number(key.slice(4))) ??
+            disc.maps.get(Number(key.slice(4))) ??
+            audio.resources.get(key))
+          : (disc.shadowed?.get(key) ?? audio.resources.get(key));
+      // A resource the disc listed and the Project no longer has is left out.
+      if (bytes) own.set(key, bytes);
+    }
+
+    const n = String(disc.number).padStart(3, '0');
+    const { mapFile, volumeFile } = named.get(disc.number) ?? {
+      mapFile: `RESMAP.${n}`,
+      volumeFile: `RESSCI.${n}`,
+    };
+    const packable = packableFrom(own, refused);
+    const volume = writeVolume(packable, headerShapeFor(mapVersion), refused);
+    const map = isDirectoryMap(mapVersion)
+      ? writeDirectoryMap(packable, mapVersion, 0, refused)
+      : writeFlatMap(packable, mapVersion, volumeNumberFor(mapVersion), refused);
+    if (packable.length > 0 && refused.length === 0) {
+      const why = readBackRefusal(
+        map,
+        mapVersion,
+        isDirectoryMap(mapVersion) ? 0 : volumeNumberFor(mapVersion),
+        mapFile,
+      );
+      if (why) refused.push(why);
+    }
+    files.push({ name: mapFile, data: map }, { name: volumeFile, data: volume });
+    discFiles.push(mapFile, volumeFile);
+    volumeBytes += volume.length;
+  }
+
+  const carried = audio.carried;
+  return {
+    files: refused.length > 0 ? [] : [...files, ...carried],
+    mapFile: discFiles[0] ?? '',
+    volumeFile: discFiles[1] ?? '',
+    refused,
+    carried: carried
+      .map((file) => file.name)
+      .filter((name) => !audio.rebuiltVolumes.includes(name)),
+    rebuiltVolumes: audio.rebuiltVolumes,
+    replacedAudio: audio.replaced,
+    resourceCount: audio.resources.size,
+    volumeBytes,
+    discFiles,
+  };
+}
+
+/**
+ * The discs `packSciGame` packs a numbered-disc install back into, read out of
+ * the folder's own maps. Empty for an install with one map and its audio in
+ * `RESOURCE.AUD`, which packs as it always has.
+ *
+ * Read here: each disc's audio maps, a few kilobytes each, and each disc's
+ * own copy of any resource a later disc shadows. Everything else is each
+ * disc's list of keys, which the resource layer already holds.
+ */
+export async function sciPackDiscs(resources: SciResources): Promise<SciAudioDisc[]> {
+  const layout = resources.layout;
+  if (!(layout.discs.length > 1 || layout.multiDiscAudio)) return [];
+  const discs: SciAudioDisc[] = [];
+  for (const disc of resources.discs) {
+    const maps = new Map<number, Uint8Array>();
+    for (const number of resources.listOnDisc(disc, 'map')) {
+      const bytes = await resources.readOnDisc('map', number, disc);
+      if (bytes) maps.set(number, bytes);
+    }
+    const shadowed = new Map<string, Uint8Array>();
+    const keys = resources.keysOnDisc(disc);
+    for (const key of keys) {
+      const split = key.lastIndexOf(':');
+      const type = key.slice(0, split) as SciResourceType;
+      const number = Number(key.slice(split + 1));
+      if (resources.discOf(type, number) === disc) continue;
+      const bytes = await resources.readOnDisc(type, number, disc);
+      if (bytes) shadowed.set(key, bytes);
+    }
+    discs.push({ number: disc, keys, maps, shadowed });
+  }
+  return discs;
 }

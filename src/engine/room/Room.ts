@@ -1058,6 +1058,10 @@ const SMALL_CYCLE_UNUSED_RATE = 0x0aaa;
  * Direction is not stored. The original sets the flags to 2 for every slot it
  * fills, which is its own "rotate downwards", so there is one direction here
  * and it is not the one v5 defaults to.
+ *
+ * The counter starts at the range's first colour rather than at zero, because
+ * a small-header game uses it as the cycle's *position* and treats zero as
+ * "stopped" (`initCycl`); see `ShadowPalette.advanceSmallHeaderCycle`.
  */
 function parseSmallColorCycles(data: Uint8Array, chunk: Chunk): ColorCycle[] {
   const cycles: ColorCycle[] = [];
@@ -1077,7 +1081,7 @@ function parseSmallColorCycles(data: Uint8Array, chunk: Chunk): ColorCycle[] {
       end: cycleEnd,
       delay: Math.max(1, Math.floor(16384 / rate)),
       direction: -1,
-      counter: 0,
+      counter: start,
     });
   }
   return cycles;

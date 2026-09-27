@@ -215,7 +215,7 @@ describe('the Kernel gap, per Version', () => {
    * exactly when it was inside either shape, over two hundred random crossing
    * convex pairs.
    */
-  it('leaves nothing absent before SCI1.1, and one there', () => {
+  it('leaves nothing absent at any SCI16 Version', () => {
     // `AssertPalette`, `IsItSkip`, `ResCheck` and `TextFonts` each needed a
     // hook into the engine — a palette loader, a cel's pixels and its clear
     // key, the resource map, the text-code font store — and each has one now.
@@ -233,9 +233,9 @@ describe('the Kernel gap, per Version', () => {
     }
 
     // `PalVary` has since been written — a palette fade the cycle advances —
-    // and `Portrait` is what is left: the talking-head surface, with its own
-    // resource kind and its own audio sync, which is not a hook away.
-    expect(kernelCoverageFor('sci1-1').missing).toEqual(['Portrait']);
+    // and so has `Portrait`, the last: King's Quest VI's talking heads, read
+    // from the `.BIN` files in the game's folder and drawn as the face.
+    expect(kernelCoverageFor('sci1-1').missing).toEqual([]);
   });
 
   /**
@@ -300,47 +300,76 @@ describe('the Kernel gap, per Version', () => {
     // `NULL_REG` to everything, and a SCI32 room's `PolyPath` uses what it
     // returns as the route — so the destination of every click fell out as
     // 0, 0 and the ego walked toward the origin until she left the room.
-    expect(row('sci0-early')).toEqual([112, 76, 30, 6, 0]);
-    expect(row('sci01')).toEqual([112, 76, 30, 6, 0]);
-    expect(row('sci1-early')).toEqual([137, 87, 39, 11, 0]);
-    expect(row('sci1-late')).toEqual([137, 87, 39, 11, 0]);
-    expect(row('sci1-1')).toEqual([137, 87, 38, 11, 1]);
-    expect(row('sci2')).toEqual([150, 86, 27, 13, 24]);
-    expect(row('sci2-1-early')).toEqual([123, 71, 21, 11, 20]);
-    // SCI3 does not move: its table lists `AvoidPath` as a dummy.
-    expect(row('sci3')).toEqual([122, 68, 21, 11, 22]);
+    //
+    // The most recent move was the widest, and each column says why. SCI16
+    // gained five: `Said` and `SetSynonyms` (the parser's other half),
+    // `GetSaveFiles` and `CheckSaveGame` (the restore dialog's listing) and
+    // `DirLoop`, all out of the constant column — except at SCI1.1, which
+    // renumbered `SetSynonyms`'s slot to `Portrait` and so gained four. SCI32
+    // gained the rest from the missing column: SCI2's separate `List`
+    // spellings, the three line calls, and the machine questions —
+    // `GetConfig`, the disc, the save names, `PrintDebug`. Its **unused**
+    // column grew too, by the six calls ScummVM's own table maps to a dummy:
+    // the polygon editor's three, `LoadChunk`, `TestPoly` and `InvertRect`.
+    // They were counted as missing, which made the gap larger than the work.
+    //
+    // **The last move closed every missing column**, and it is two moves in
+    // one, which the rows say apart. Out of the constant column came the
+    // surfaces SCI16 had answered with nought — the six menu and status calls,
+    // `ShakeScreen`, `Graph`, `Palette`, `AddToPic`, `DrawCel`, `OnControl` —
+    // ten of them at SCI0 and twelve from SCI1 on. Out of the missing column
+    // came `Portrait` at SCI1.1 and SCI32's remainder (`sciKernelRemaining.ts`).
+    // And two went to the unused column rather than the implemented one,
+    // because ScummVM answers them with nothing: `RepaintPlane`, which its
+    // table maps to a dummy, and SCI3's `WinExec`, whose body is
+    // `return NULL_REG`.
+    //
+    // **And then the constant column was reviewed name by name**, which moved
+    // everything left in it that ScummVM gives behaviour: collision
+    // (`CanBeHere`, `CantBeHere`, `DoAvoider`), `SetJump`, `DoAudio`, the
+    // restart pair, `HiliteControl`, `Show`, the memory and resource calls,
+    // `Platform` and `DeviceInfo`. `DbugStr` went to the unused column, being
+    // `MAP_DUMMY`. What is left constant is what ScummVM answers with a
+    // constant too, each named with its reason beside the list.
+    expect(row('sci0-early')).toEqual([112, 102, 4, 6, 0]);
+    expect(row('sci01')).toEqual([112, 102, 4, 6, 0]);
+    expect(row('sci1-early')).toEqual([137, 118, 7, 12, 0]);
+    expect(row('sci1-late')).toEqual([137, 118, 7, 12, 0]);
+    expect(row('sci1-1')).toEqual([137, 118, 7, 12, 0]);
+    expect(row('sci2')).toEqual([150, 121, 9, 20, 0]);
+    expect(row('sci2-1-early')).toEqual([123, 98, 8, 17, 0]);
+    // SCI3 does not move for `AvoidPath`: its table lists it as a dummy.
+    expect(row('sci3')).toEqual([122, 96, 9, 17, 0]);
   });
 
   /**
-   * SCI32's gap, published rather than closed.
+   * SCI32's gap, published — and now closed.
    *
    * ADR 0020 asks for the gap between what this project can play and what it
-   * can edit to be a published number rather than an impression, and this is
-   * the same shape of claim for the Kernel: 58 calls at SCI2 and SCI2.1, 59 at
-   * SCI3, untouched by this run by instruction. The one that moved did so
-   * sideways — `MergePoly` is named at SCI2 and SCI2.1 and was written for
-   * SCI16, so SCI32 inherited it without SCI32 being worked on. SCI3 does not
-   * name it, which is why SCI3 is the row that did not move. Pinned so that
-   * closing one is a deliberate edit to this line rather than a number that
-   * quietly drifts.
+   * can edit to be a published number rather than an impression, and this was
+   * the same shape of claim for the Kernel: four calls at SCI2, eight at
+   * SCI2.1 and nine at SCI3, each a surface with nothing behind it — typed
+   * text input, Windows' own message box and DLLs, `MovePlaneItems` and
+   * `ScrollWindow`, the hot-rectangle mouse regions, `CelLink`, `MorphOn`'s
+   * palette morph, SCI3's `WebConnect` and `WinExec`.
+   *
+   * Every one is now answered as ScummVM answers it, and the one ScummVM
+   * answers with an empty body (`WinExec`) is counted with the unused calls
+   * rather than here. Pinned at nought so that a call which arrives in a table
+   * later and is *not* answered fails here by name.
    */
-  it('publishes SCI32s gap rather than closing it', () => {
+  it('has nothing left absent from any SCI32 table', () => {
     const gap = Object.fromEntries(
       SCI_VERSIONS.filter((version) => version.startsWith('sci2') || version === 'sci3').map(
-        (version) => [version, kernelCoverageFor(version).missing.length],
+        (version) => [version, kernelCoverageFor(version).missing],
       ),
     );
     expect(gap).toEqual({
-      // SCI2 sits above the SCI2.1 rows because `Font`, `CD` and `Text`'s
-      // sub-opped forms arrive at SCI2.1 middle: a call this engine answers
-      // there has no slot to answer at SCI2, so closing it does not move
-      // SCI2's number. SCI3 sits above them because `SetScroll` is a dummy
-      // there, and a dummy is not a handler.
-      sci2: 24,
-      'sci2-1-early': 20,
-      'sci2-1-middle': 20,
-      'sci2-1-late': 20,
-      sci3: 22,
+      sci2: [],
+      'sci2-1-early': [],
+      'sci2-1-middle': [],
+      'sci2-1-late': [],
+      sci3: [],
     });
   });
 

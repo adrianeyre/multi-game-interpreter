@@ -188,7 +188,11 @@ export async function importProjectFile(file: File): Promise<Project> {
   const source = await readZip(bytes, file.name);
   const names = source.list();
 
-  const documentName = names.find((name) => name.endsWith('.json'));
+  // The project document by its own suffix first: a Save zip also carries a
+  // `manifest.json`, and picking whichever JSON came first would parse that.
+  const documentName =
+    names.find((name) => name.endsWith('.scummproj.json')) ??
+    names.find((name) => name.endsWith('.json') && !name.endsWith('manifest.json'));
   if (!documentName) throw new Error('That archive has no project file in it');
 
   const document = await source.read(documentName);

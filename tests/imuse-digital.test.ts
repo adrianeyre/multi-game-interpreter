@@ -414,10 +414,10 @@ describe('the digital dispatch through the sound engine', () => {
     const setLevel = vi.spyOn(sound, 'setSoundLevel');
 
     // Full Throttle's own start-up command: 12, sound 2, volume (0x600) 25.
-    // Through v6's decoder that is command 12 in scope 0, which iMUSE has no
-    // such command for and which is what this used to be reported as.
-    sound.kludge([12, 2, DIGITAL_PARAM.Volume, 25]);
-    expect(logs.join('\n')).toContain('iMUSE command 12 (scope 0)');
+    // Through v6's decoder that is command 12 in scope 0 — Sam & Max's
+    // player-scope sub-command — which finds no player for sound 2 and fails,
+    // as the original's does, without touching any sound's level.
+    expect(sound.kludge([12, 2, DIGITAL_PARAM.Volume, 25])).toBe(-1);
     expect(setLevel).not.toHaveBeenCalled();
 
     // Through the digital decoder it sets a volume, and says nothing.

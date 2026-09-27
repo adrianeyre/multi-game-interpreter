@@ -41,7 +41,17 @@ import {
   soundVersionFor,
   type SciSoundOp,
 } from '../sound/sciDoSound.js';
-import { describeSciVersion } from '../sciVersion.js';
+import { before, describeSciVersion } from '../sciVersion.js';
+import type { SciParsedWord } from '../resource/sciVocabulary.js';
+import { buildSentence, matchSaid, readSaidSpec, type SaidSentence } from './sciSaid.js';
+import { readSci0Blocks, sci0ScriptBias } from './scriptResource.js';
+import { createRemainingKernel, sciPriorityBands } from './sciKernelRemaining.js';
+import { createLeftoverKernel } from './sciKernelLeftovers.js';
+import type { SciAudioChannels, SciPcm } from '../sound/sciAudioPlayer.js';
+import type { SciMenuBar } from '../gfx/SciMenu.js';
+import type { SciPalette16 } from '../gfx/sciPalette16.js';
+import type { SciRect16 } from '../gfx/sciPaint16.js';
+import type { SciScrollWindow } from '../gfx/SciScrollWindow.js';
 
 /** What a Kernel call can reach. */
 /**
@@ -546,7 +556,19 @@ export interface SciKernelWorld {
    * means the game ships no main vocabulary, which is not an error — SCI1 and
    * later replaced the parser with an icon bar and ship none.
    */
-  parseInput?(line: string): { groups: number[]; unknown: string[] } | null;
+  parseInput?(
+    line: string,
+  ): { groups: number[]; unknown: string[]; words?: SciParsedWord[] } | null;
+  /**
+   * The saves the game's own menu has written this session, by the slot it
+   * gave them.
+   *
+   * `GetSaveFiles` lists these into the game's restore dialog and
+   * `CheckSaveGame` asks whether one slot is among them. Optional for the
+   * reason every surface here is, and absent means "none", which is what the
+   * two calls answered before there was anything to list.
+   */
+  savedGames?(): Array<{ slot: number; description: string }>;
   /**
    * The game object, which is what `Parse` reports a failure *to*.
    *
@@ -567,6 +589,144 @@ export interface SciKernelWorld {
     type: number;
     state: number;
   }): void;
+
+  // ------------------------------------------ the last surfaces (#remaining) ---
+  /**
+   * SCI16's menu bar and status line, which the interpreter draws for the
+   * game (`GfxMenu`). The model is the engine's; `sciKernelRemaining.ts`
+   * reads the game's arguments into it.
+   */
+  menuBar?: SciMenuBar;
+  /**
+   * Holds the scripts while a pull-down is open and waiting for the player,
+   * as Sierra's `MenuSelect` held them inside the call. `pauseSound` is the
+   * call's second argument.
+   */
+  holdForMenu?(pauseSound: boolean): void;
+  /** Shakes what is presented, `times` times: bit 0 of `directions` down, bit 1 right. */
+  shakeScreen?(times: number, directions: number): void;
+  /** How many colours the display shows: 16 for an EGA game, 256 for VGA. */
+  colourCount?(): number;
+  /** SCI16's palette state over the colours on screen, which `Palette` works on. */
+  palette16?: SciPalette16;
+  /** SCI32's `SetFade`: a percentage over an inclusive range of entries. */
+  paletteFade?(from: number, to: number, percent: number): void;
+  /** SCI32's `SetGamma`: one of four levels, or -1 for none. */
+  setGamma?(level: number): void;
+  /** SCI16's immediate drawing onto the room's three buffers. */
+  graph16?: {
+    drawLine(
+      from: { x: number; y: number },
+      to: { x: number; y: number },
+      colour: number,
+      priority: number,
+      control: number,
+    ): void;
+    fillBox(rect: SciRect16, mask: number, colour: number, priority: number, control: number): void;
+    /** A handle for `restoreBox`, never nought. */
+    saveBox(rect: SciRect16, mask: number): number;
+    restoreBox(handle: number): void;
+    /** A cel by its top left, with Sierra's priority test. */
+    drawCel(
+      view: number,
+      loop: number,
+      cel: number,
+      left: number,
+      top: number,
+      priority: number,
+    ): void;
+    onControl(mask: number, rect: SciRect16): number;
+    /** Swaps the port's pen and back colours inside a rectangle: `invertRect`. */
+    invertRect(rect: SciRect16): void;
+    /** The current port's pen and back colours. */
+    portColours(): { pen: number; back: number };
+  };
+  /** Starts reading a King's Quest VI portrait file, so the show finds it in hand. */
+  portraitLoad?(name: string): void;
+  /**
+   * Draws a portrait's face: true when drawn, false when there is no such
+   * file, and `'loading'` while it is still being read.
+   */
+  portraitShow?(request: {
+    name: string;
+    x: number;
+    y: number;
+    resource: number;
+    noun: number;
+    verb: number;
+    cond: number;
+    seq: number;
+  }): boolean | 'loading';
+  /**
+   * When each mouth frame shows during the line, from its `rave` data: null
+   * when the line has none, undefined while it is still being read.
+   */
+  portraitSchedule?(
+    request: Parameters<NonNullable<SciKernelWorld['portraitShow']>>[0],
+  ): Array<{ at: number; bitmap: number }> | null | undefined;
+  /** Draws a mouth frame over the face, or with null the closed-mouthed face alone. */
+  portraitFrame?(name: string, bitmap: number | null): void;
+  portraitUnload?(id: number): void;
+  /** `InputText`'s box, drawn while it is open; null takes it down. */
+  showTextEditor?(
+    box: {
+      title: string;
+      text: string;
+      cursor: number;
+      rect: { x: number; y: number; width: number; height: number };
+    } | null,
+  ): void;
+  /** Digital audio's channels — one for SCI16, five for SCI32 — and their clock. */
+  audio?: SciAudioChannels;
+  /**
+   * A clip by `module:number` or `module:noun:verb:cond:seq`: its PCM, null
+   * when the game has no such audio, undefined while it is being read.
+   */
+  audioClip?(id: string): SciPcm | null | undefined;
+  /** Starts the game over from its own `play`, between cycles. */
+  restartGame?(): void;
+  /** `gameIsRestarting`: set by a restart, cleared by the game. */
+  restarting?: { flag(): number; clear(): void };
+  /** Starts reading a resource the game says it is about to need. */
+  preloadResource?(type: number, number: number): void;
+  /** Deletes one of the session's saves by the slot the game gave it. */
+  deleteSave?(slot: number): void;
+  /** Which machine the release is for. */
+  platform?(): 'dos' | 'windows' | 'mac';
+  /** Puts one of the room's three screens on display for a frame. */
+  showMap?(map: 'visual' | 'priority' | 'control'): void;
+  /** A SCI32 cel's link point, from its View's header. */
+  celLink?(view: number, loop: number, cel: number, link: number): { x: number; y: number } | null;
+  /** SCI32's scroll windows: the model per window, and the screen item it is drawn as. */
+  scrollWindows?: {
+    create(request: {
+      rect: { x: number; y: number; width: number; height: number };
+      plane: Reg;
+      fore: number;
+      back: number;
+      font: number;
+      alignment: number;
+      border: number;
+      maxEntries: number;
+    }): number;
+    window(id: number): SciScrollWindow | null;
+    /** The window's text moved: draw it again. */
+    changed(id: number): void;
+    show(id: number): void;
+    hide(id: number): void;
+    destroy(id: number): void;
+  };
+  /**
+   * Moves every screen item on a Plane, its Picture's only with `scrollPics`,
+   * answering the script objects behind the items that moved.
+   */
+  movePlaneItems?(plane: string, dx: number, dy: number, scrollPics: boolean): string[];
+  /** Makes the next `FrameOut` a palette morph (`_palMorphIsOn`). */
+  morphOn?(): void;
+  /** A host dialog; true for OK or Yes, false for No, undefined when there is none. */
+  messageBox?(message: string, title: string, yesNo: boolean): boolean | undefined;
+  /** Opens a URL in the host, answering whether anything opened. */
+  openUrl?(url: string): boolean;
 }
 
 type Handler = (world: SciKernelWorld, args: Reg[]) => Reg;
@@ -592,6 +752,23 @@ const pendingVmdAt = new WeakMap<SciKernelWorld, { x: number; y: number }>();
  * mistypes is the common case rather than the rare one.
  */
 const parserBlock = new WeakMap<SciKernelWorld, Reg>();
+
+/**
+ * The last line `Parse` accepted, which every `Said` after it is asked about.
+ *
+ * Sierra's `Vocabulary` holds exactly this — `parser_event` and a flag saying
+ * the tree is valid — and `kParse` clears the flag before it tries, so a line
+ * that fails leaves nothing behind for a room to match. `classified` is false
+ * when the host's parse carried no word classes, which leaves `Said` unable to
+ * tell a verb from an object.
+ */
+const parserState = new WeakMap<
+  SciKernelWorld,
+  { event: Reg; sentence: SaidSentence; classified: boolean }
+>();
+
+/** The synonyms `SetSynonyms` installed, from one word group to another. */
+const parserSynonyms = new WeakMap<SciKernelWorld, Map<number, number>>();
 
 /** Worlds that have already been told this game ships no `vocab.000`. */
 const reportedNoVocabulary = new WeakSet<SciKernelWorld>();
@@ -1427,6 +1604,30 @@ export const SCI_UNUSED_KERNEL_NAMES: readonly string[] = [
   'PreloadResource',
   'FindSelector',
   'FindClass',
+  // The polygon editor's three and `LoadChunk`, `MAP_DUMMY` beside the
+  // debugger calls above — ScummVM's table groups them as "called from the
+  // inbuilt debugger or polygon editor" — and `InvertRect`, which that table
+  // annotates "only in SCI2, not used in any SCI2 game".
+  'AddPolygon',
+  'DeletePolygon',
+  'UpdatePolygon',
+  'LoadChunk',
+  'TestPoly',
+  'InvertRect',
+  // `DbugStr`, `MAP_DUMMY` in the same table: Sierra's debug print, which a
+  // retail game reaching would be printing to a monochrome monitor.
+  'DbugStr',
+  // `RepaintPlane`, which the same table maps to `MAP_DUMMY` beside
+  // `AddMagnify`. It was answered as a constant and counted with the calls a
+  // game makes; ScummVM's table says no game needs it answered at all.
+  'RepaintPlane',
+
+  // SCI3's `WinExec`, which ScummVM maps as a call and whose body is
+  // `return NULL_REG` (`kmisc.cpp`): it would start a Windows program, and an
+  // interpreter that has run every SCI3 title has never started one. Counted
+  // with the others that answer nothing for the same reason, rather than
+  // among the calls with behaviour.
+  'WinExec',
 
   'InspectObj',
   'ShowSends',
@@ -1448,8 +1649,7 @@ export const SCI_UNUSED_KERNEL_NAMES: readonly string[] = [
  * module publishes used to read "implemented" as *a handler exists under this
  * name*, and a key is not a behaviour. When this column was introduced
  * `DoSound`, `Parse`, `Said`, `SaveGame`, `RestoreGame`, `Graph` and `Palette`
- * were each `() => int(0)`; four of the seven have since gained behaviour and
- * `Said`, `Graph` and `Palette` have not. Every one of them was counted beside
+ * were each `() => int(0)`; all seven have since gained behaviour. Every one of them was counted beside
  * `Format` and `DrawPic`, which do the work their
  * names describe, and the effect was a figure that could only ever go up:
  * registering `MergePoly: () => NULL_REG` would have closed the SCI16 gap
@@ -1469,9 +1669,9 @@ export const SCI_UNUSED_KERNEL_NAMES: readonly string[] = [
  * `CanBeHere` and `CantBeHere` answer permissively on purpose because a refusal
  * hangs `findPosn`, `HaveMouse` says there is a mouse, and `UnLoad`, `Lock` and
  * `FlushResources` manage a resource cache this interpreter does not keep. Each
- * of those carries its reasoning where it is written. Others — `Said`,
- * `Graph`, `Palette`, the menu calls — are whole surfaces with
- * nothing behind them yet.
+ * of those carries its reasoning where it is written. The whole surfaces that
+ * sat here — `Graph`, `Palette`, the menu calls, `ShakeScreen`, `DrawCel`,
+ * `AddToPic`, `OnControl` — left it for `sciKernelRemaining.ts`.
  *
  * Sorting those two apart is a judgement per call, and it is not made here: the
  * column reports the measurement, and a call leaves it by gaining behaviour
@@ -1494,6 +1694,9 @@ export const SCI_CONSTANT_KERNEL_NAMES: readonly string[] = [
   'VibrateMouse',
   'ResourceTrack',
   'Purge',
+  // SCI3's `Minimize`, `MAP_EMPTY` for the same reason as `SetWindowsOption`:
+  // it minimises a Windows game window, and there is none here.
+  'Minimize',
   // Answers 100 because `SetShowStyle` finishes a transition immediately, so
   // a script polling it is always told the transition is over. ScummVM marks
   // it `MAP_DUMMY`; it is answered here rather than left in the unused group
@@ -1501,48 +1704,22 @@ export const SCI_CONSTANT_KERNEL_NAMES: readonly string[] = [
   // pair exists to avoid.
   'ShowStylePercent',
 
-  'AddMenu',
-  'AddToPic',
-  'CanBeHere',
-  'CantBeHere',
-  'CheckSaveGame',
-  'DbugStr',
-  'DeviceInfo',
-  'DirLoop',
-  'DisposeScript',
-  'DoAudio',
-  'DoAvoider',
-  'DrawCel',
-  'DrawMenuBar',
-  'DrawStatus',
+  // The rest are SCI16's, and each is a constant in ScummVM too. `Empty` and
+  // `SetQuitStr` return the accumulator and nothing else (`kmisc.cpp`,
+  // `kstring.cpp`); `SetVideoMode` is a stub there ("STUB: SetVideoMode");
+  // `Joystick` returns null ("Unimplemented syscall"); `ValidPath` "always
+  // returns true"; `HaveMouse` answers `SIGNAL_REG`; `SetDebug` attaches
+  // ScummVM's own debugger, which there is none of here; and
+  // `FlushResources` runs ScummVM's garbage collector, whose job this
+  // engine's heap does not need done. None reads its arguments in ScummVM
+  // either, so a constant is the faithful answer rather than a gap.
   'Empty',
   'FlushResources',
-  'GameIsRestarting',
-  'GetMenu',
-  'GetSaveFiles',
-  'Graph',
   'HaveMouse',
-  'HiliteControl',
   'Joystick',
-  'Lock',
-  'MemoryInfo',
-  'MemorySegment',
-  'MenuSelect',
-  'OnControl',
-  'Palette',
-  'Platform',
-  'RepaintPlane',
-  'RestartGame',
-  'Said',
   'SetDebug',
-  'SetJump',
-  'SetMenu',
   'SetQuitStr',
-  'SetSynonyms',
   'SetVideoMode',
-  'ShakeScreen',
-  'Show',
-  'UnLoad',
   'ValidPath',
 ];
 
@@ -1750,10 +1927,7 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     // straight to whatever wanted the resource loaded.
     return int(args[1]?.offset ?? 0);
   },
-  UnLoad: () => NULL_REG,
-  DisposeScript: () => NULL_REG,
   FlushResources: () => NULL_REG,
-  Lock: () => NULL_REG,
 
   // ----------------------------------------------------------- objects ---
   Clone: (world, args) => world.machine.clone(args[0] ?? NULL_REG) ?? NULL_REG,
@@ -2054,7 +2228,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     // ten and is told zero runs its animation at once.
     return int(args[0]?.offset ?? 0);
   },
-  GameIsRestarting: () => int(0),
 
   // ------------------------------------------------------------ strings ---
   StrLen: (world, args) => int(readString(world, args[0] ?? NULL_REG, true).length),
@@ -2417,9 +2590,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     }
   },
 
-  MemoryInfo: () => int(0x7fff),
-  MemorySegment: () => NULL_REG,
-
   // ------------------------------------------------------------- input ---
   /**
    * `GetEvent(mask, event)` — the poll every SCI game's main loop runs.
@@ -2481,13 +2651,13 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     }
     return int(event ? 1 : 0);
   },
-  HaveMouse: () => int(1),
+  // `kHaveMouse` answers `SIGNAL_REG`, 0xFFFF, whatever is attached; a script
+  // tests it for truth and some compare it, so the value is ScummVM's.
+  HaveMouse: () => int(0xffff),
   MapKeyToDir: (_world, args) => args[0] ?? NULL_REG,
   Joystick: () => int(0),
 
   // ----------------------------------------------------------- platform ---
-  Platform: () => int(1),
-  DeviceInfo: () => int(0),
   GetCWD: (world, args) => {
     writeString(world, args[0] ?? NULL_REG, '');
     return args[0] ?? NULL_REG;
@@ -2499,10 +2669,48 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
    */
   CheckFreeSpace: (world, args) =>
     checkFreeSpace(world, args[1]?.offset ?? SCI_FREE_SPACE.enoughToSave),
-  GetSaveFiles: () => int(0),
-  CheckSaveGame: () => int(0),
+  /**
+   * `GetSaveFiles(game, names, slots)` — what the restore dialog lists.
+   *
+   * `kGetSaveFiles` (`kfile.cpp`, fetched 2026-09-27): each description into
+   * `names` at a stride of 36 bytes, the list ended by an empty one, each
+   * save's number into `slots` as a word, and the count as the answer. At
+   * most twenty, which is as many as Sierra's dialog has rows for.
+   *
+   * The numbers are the ones the game gave `SaveGame`, handed back unchanged,
+   * so the `RestoreGame` the dialog makes next names the save it listed.
+   * ScummVM offsets its own by 100 to tell them from its launcher's; this
+   * engine has no second list to tell them from.
+   */
+  GetSaveFiles: (world, args) => {
+    const saves = (world.savedGames?.() ?? []).slice(0, SCI_MAX_SAVES);
+    const names = bytesAt(world, args[1] ?? NULL_REG);
+    const slots = bytesAt(world, args[2] ?? NULL_REG);
+    saves.forEach((save, index) => {
+      if (names) {
+        const text = save.description.slice(0, SCI_SAVE_NAME_LENGTH - 1);
+        for (let i = 0; i < SCI_SAVE_NAME_LENGTH; i++) {
+          names.set(index * SCI_SAVE_NAME_LENGTH + i, i < text.length ? text.charCodeAt(i) : 0);
+        }
+      }
+      slots?.set(index * 2, save.slot & 0xff);
+      slots?.set(index * 2 + 1, (save.slot >> 8) & 0xff);
+    });
+    names?.set(saves.length * SCI_SAVE_NAME_LENGTH, 0);
+    return int(saves.length);
+  },
+  /**
+   * `CheckSaveGame(game, slot)` — whether a save can be restored.
+   *
+   * Sierra's also refused a save written by another version of the
+   * interpreter. A save here is this session's own capture of the object
+   * graph, so the only question left is whether the slot holds one.
+   */
+  CheckSaveGame: (world, args) => {
+    const slot = args[1]?.offset ?? 0;
+    return int((world.savedGames?.() ?? []).some((save) => save.slot === slot) ? 1 : 0);
+  },
   SetDebug: () => NULL_REG,
-  DbugStr: () => NULL_REG,
   SetQuitStr: () => NULL_REG,
   Empty: () => NULL_REG,
   GetSaveDir: (world) => world.heap.allocate(2),
@@ -3227,6 +3435,8 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
   SetWindowsOption: () => NULL_REG,
   VibrateMouse: () => NULL_REG,
   ResourceTrack: () => NULL_REG,
+  /** SCI3's `Minimize`, `MAP_EMPTY` too: it minimises a window there is none of. */
+  Minimize: () => NULL_REG,
 
   /** `Purge(n)` is SCI32's name for `FlushResources` (`kernel_tables.h`). */
   Purge: () => NULL_REG,
@@ -3446,6 +3656,17 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
         );
         return NULL_REG;
     }
+  },
+
+  /**
+   * `DisposeTextBitmap(bitmap)` — SCI2's own call for freeing a text bitmap.
+   *
+   * SCI2.1 folded it into `Bitmap` as sub 1, and ScummVM maps the SCI2 name
+   * straight onto `kBitmapDestroy`; this does the same.
+   */
+  DisposeTextBitmap: (world, args) => {
+    world.bitmapDestroy?.(args[0]?.offset ?? 0);
+    return world.machine.acc;
   },
 
   /**
@@ -3847,12 +4068,11 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
    * implements for SCI16 under its own name, so this dispatches to those rather
    * than writing a second list.
    *
-   * **Subs 19 to 22 are not dispatched here and report themselves.**
-   * `ListEachElementDo`, `ListFirstTrue`, `ListAllTrue` and `ListSort` send a
-   * Selector to every element, and a send from inside a Kernel handler is a
-   * re-entry into the machine this engine does not do yet. Reporting is the
-   * honest answer: a game whose `firstTrue` quietly returns nothing is a game
-   * that runs and takes the wrong branch.
+   * **Subs 19 to 21 send a Selector to every element** — `EachElementDo`,
+   * `FirstTrue`, `AllTrue` — through `listSelectorWalk`, which re-enters the
+   * machine with `PMachine.invoke`. Sub 22, `ListSort`, is not dispatched and
+   * reports itself: a game whose list is quietly left unsorted runs and takes
+   * the wrong branch.
    */
   List: (world, args) => {
     const sub = args[0]?.offset ?? 0;
@@ -3903,30 +4123,10 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
         return call('FindKey');
       case 16:
         return call('DeleteKey');
-      case 17: {
-        // `ListAt(list, index)`, which SCI16 has no equivalent of: walked here
-        // rather than added to the heap, because an index into a linked list is
-        // a walk however it is spelled.
-        let node = world.heap.list(rest[0] ?? NULL_REG)?.first ?? NULL_REG;
-        for (let i = rest[1]?.offset ?? 0; i > 0 && !isNull(node); i--) {
-          node = world.heap.node(node)?.next ?? NULL_REG;
-        }
-        return world.heap.node(node)?.value ?? NULL_REG;
-      }
-      case 18: {
-        const wanted = rest[1] ?? NULL_REG;
-        let node = world.heap.list(rest[0] ?? NULL_REG)?.first ?? NULL_REG;
-        for (let index = 0; !isNull(node); index++) {
-          const value = world.heap.node(node)?.value ?? NULL_REG;
-          if (value.segment === wanted.segment && value.offset === wanted.offset) {
-            return int(index);
-          }
-          node = world.heap.node(node)?.next ?? NULL_REG;
-        }
-        // Sierra's own answer for "not in the list", and not zero, which is a
-        // valid index.
-        return int(0xffff);
-      }
+      case 17:
+        return listAt(world, rest);
+      case 18:
+        return listIndexOf(world, rest);
       case 19:
       case 20:
       case 21:
@@ -3940,6 +4140,20 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
         return NULL_REG;
     }
   },
+
+  /*
+   * SCI2's own spellings of five `List` sub-functions.
+   *
+   * SCI2 gave each of these a Kernel number of its own, 0x58 to 0x5c; SCI2.1
+   * folded them into `List` as subs 17 to 21 (`kernel_tables.h`, where both
+   * forms map to the same `kListAt` and siblings). One implementation, two
+   * doors, for the reason `OnMe` and `IsOnMe` share one.
+   */
+  ListAt: (world, args) => listAt(world, args),
+  ListIndexOf: (world, args) => listIndexOf(world, args),
+  ListEachElementDo: (world, args) => listSelectorWalk(world, 19, args),
+  ListFirstTrue: (world, args) => listSelectorWalk(world, 20, args),
+  ListAllTrue: (world, args) => listSelectorWalk(world, 21, args),
 
   /**
    * `Save(sub, ...)` — SCI32's saved games, folded into one Kernel number.
@@ -3972,11 +4186,9 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
         // `GetSaveFiles32` — no files, which is the honest count.
         return int(0);
       case 6:
+        return SCI_KERNEL.MakeSaveCatName(world, args.slice(1));
       case 7:
-        // The catalogue and file names a save *would* use. Answered as empty
-        // rather than invented, because a name this engine does not write to is
-        // a name no game should be told exists.
-        return args[1] ?? NULL_REG;
+        return SCI_KERNEL.MakeSaveFileName(world, args.slice(1));
       case 8:
         // `GameIsRestarting`, which SCI16 has as its own ordinal and answers
         // the same way.
@@ -4114,7 +4326,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     world.deletePlane?.(planeId(args[0] ?? NULL_REG));
     return NULL_REG;
   },
-  RepaintPlane: () => NULL_REG,
 
   AddScreenItem: (world, args) => {
     const object = world.machine.object(args[0] ?? NULL_REG);
@@ -4309,7 +4520,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
   // carry on from, and every one of them is listed in `describeStall` so a
   // person reading a report can see that the picture is not being drawn rather
   // than inferring it from an empty screen.
-  Show: () => NULL_REG,
   PicNotValid: (world, args) => {
     // A script asks whether the Picture it drew is still valid and draws again
     // if not. Answering "not valid" for ever makes a game redraw its room every
@@ -4329,7 +4539,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     world.drawPicture?.(args[0]?.offset ?? 0);
     return NULL_REG;
   },
-  AddToPic: () => NULL_REG,
   /**
    * `Animate(list, cycle)` — the cast, drawn.
    *
@@ -4378,8 +4587,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     world.drawCast?.(cast);
     return NULL_REG;
   },
-  DrawCel: () => NULL_REG,
-  DrawStatus: () => NULL_REG,
   /**
    * `DrawControl(control)` — a button, a label or an edit field.
    *
@@ -4404,7 +4611,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     drawControl(world, object);
     return NULL_REG;
   },
-  HiliteControl: () => NULL_REG,
   /**
    * `EditControl(control, event)` — the player typing into a text field.
    *
@@ -4555,7 +4761,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     if (text !== '') world.showText?.(text, { x, y, font, colour, width });
     return NULL_REG;
   },
-  ShakeScreen: () => NULL_REG,
   /**
    * `SetCursor(number, visible)` — or, from SCI1.1, a View, loop and cel.
    *
@@ -4722,7 +4927,8 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
    */
   CD: (world, args) => {
     const sub = args[0]?.offset ?? 0;
-    if (sub === 0 || sub === 1) return int(1);
+    if (sub === 0) return SCI_KERNEL.CheckCDisc(world, args.slice(1));
+    if (sub === 1) return SCI_KERNEL.GetSaveCDisc(world, []);
     world.log(
       `CD sub-function ${sub} is not one of the two Sierra's own table lists — check and ` +
         `saved-disc — so it is a misread argument rather than a gap.`,
@@ -4753,6 +4959,229 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
       world.log(`WinHelp sub-function ${sub} is not one Sierra's own table lists.`);
     }
     return NULL_REG;
+  },
+
+  // ------------------------------------------ SCI32's smaller surfaces ---
+  /**
+   * `SetFontRes(width, height)` — SCI2.1 early's spelling of `Font`'s sub 1.
+   *
+   * The resolution text is laid out in. SCI2.1 middle folded it into `Font`;
+   * the effect is the same, so this is that sub-function's door.
+   */
+  SetFontRes: (world, args) => {
+    world.setTextResolution?.(args[0]?.offset ?? 0, args[1]?.offset ?? 0);
+    return world.machine.acc;
+  },
+
+  /**
+   * `CheckCDisc([disc])` — is this disc in, and which disc is?
+   *
+   * A Drive install is one volume set with every disc's resources already in
+   * it, so every disc a game asks for is present and becomes the current one.
+   * That is `kCheckCD`'s own shape (`kfile.cpp`: `findDisc(cdNo)` then the
+   * current disc), and answering it rather than a fixed one matters: a game
+   * that asks for disc 2 and is told disc 1 is in asks the player to swap
+   * discs that do not exist.
+   *
+   * The current disc is held beside the machine because it is the running
+   * session's, and `GetSaveCDisc` reads it back.
+   */
+  CheckCDisc: (world, args) => {
+    const wanted = signed(args[0] ?? NULL_REG);
+    if (wanted > 0) currentDisc.set(world.machine, wanted);
+    return int(currentDisc.get(world.machine) ?? 1);
+  },
+  /**
+   * `GetSaveCDisc()` — the disc a save was made on.
+   *
+   * Sierra read it from the save being restored. A save here is the object
+   * graph (ADR 0019) and carries no disc, so this answers the disc now current
+   * — ScummVM's own answer, for the same reason.
+   */
+  GetSaveCDisc: (world) => int(currentDisc.get(world.machine) ?? 1),
+
+  /**
+   * `MakeSaveCatName(out, game)` — the name of a game's save catalogue.
+   *
+   * Sierra's scheme is the game's short name followed by `sg.cat` — King's
+   * Quest VII's `kq7cdsg.cat`, which ScummVM's `kfile.cpp` recognises by that
+   * suffix. Answered with the real name rather than ScummVM's `fake.cat`:
+   * ScummVM invents one so it can ignore the catalogue writes, and this engine
+   * has a file surface that can simply hold the catalogue the game writes.
+   */
+  MakeSaveCatName: (world, args) => {
+    const out = args[0] ?? NULL_REG;
+    putString(world, out, `${readString(world, args[1] ?? NULL_REG, true)}sg.cat`);
+    return out;
+  },
+  /** `MakeSaveFileName(out, game, number)` — one save's file, `kq7cdsg.003`. */
+  MakeSaveFileName: (world, args) => {
+    const out = args[0] ?? NULL_REG;
+    const number = String(Math.max(0, signed(args[2] ?? NULL_REG))).padStart(3, '0');
+    putString(world, out, `${readString(world, args[1] ?? NULL_REG, true)}sg.${number}`);
+    return out;
+  },
+
+  /**
+   * `GetConfig(setting, string)` — a line from the game's `RESOURCE.CFG`.
+   *
+   * Sierra's installer wrote the file and a few games read settings back from
+   * it: Phantasmagoria asks for the benchmark its installer ran, and plays at a
+   * crawl when the answer is below 425. There is no installer here and no file,
+   * so the answers are ScummVM's (`kmisc.cpp`): the fastest machine CPUID could
+   * report, benchmarks above the game's threshold, English, and empty for the
+   * debug and start-up switches a shipped game leaves unset. A setting outside
+   * that list is answered empty and said once — ScummVM stops the game there,
+   * and an empty answer is what a missing line would have given Sierra's.
+   */
+  GetConfig: (world, args) => {
+    const setting = readString(world, args[0] ?? NULL_REG, true).toLowerCase();
+    const holder = world.machine.object(args[1] ?? NULL_REG);
+    const target = holder ? readPropertyReg(world, holder, 'data') : (args[1] ?? NULL_REG);
+    const known = SCI_CONFIG_ANSWERS[setting];
+    if (known === undefined) {
+      reportOnce(
+        world,
+        `GetConfig.${setting}`,
+        `The game asked RESOURCE.CFG for "${setting}", which is not one of the settings ` +
+          `a shipped game is known to read. It was answered empty.`,
+      );
+    }
+    putString(world, target, known ?? '');
+    return args[1] ?? NULL_REG;
+  },
+
+  /**
+   * `GetSierraProfileInt(category, setting, default)` — a number from the
+   * Windows `.INI` Sierra's installer wrote, after `GetPrivateProfileInt`.
+   *
+   * The one setting a game is known to ask for is the same benchmark
+   * `GetConfig` answers, and it is answered the same; anything else takes the
+   * default the game passed, which is what a missing key gives Windows.
+   */
+  GetSierraProfileInt: (world, args) => {
+    const category = readString(world, args[0] ?? NULL_REG, true).toLowerCase();
+    const setting = readString(world, args[1] ?? NULL_REG, true).toLowerCase();
+    if (category === 'config' && setting === 'videospeed') {
+      return int(Number(SCI_CONFIG_ANSWERS.videospeed));
+    }
+    return args[2] ?? NULL_REG;
+  },
+
+  /**
+   * `SetLanguage(directory)` — switch speech to another language's folder.
+   *
+   * Mixed-Up Mother Goose Deluxe's main menu toggles between English and
+   * Spanish this way (`ksound.cpp`): the audio resources move to a directory of
+   * their own. This engine reads one audio map per game and cannot swap it
+   * mid-session, so the call is said once and the speech stays as it was —
+   * which leaves the game running in its first language rather than stopped.
+   */
+  SetLanguage: (world, args) => {
+    const directory = readString(world, args[0] ?? NULL_REG, true);
+    reportOnce(
+      world,
+      `SetLanguage.${directory}`,
+      `The game asked for its speech from "${directory}", another language's audio ` +
+        `directory. This engine reads one audio map per game and cannot switch it, so ` +
+        `speech continues in the language it started in.`,
+    );
+    return world.machine.acc;
+  },
+
+  /**
+   * `PrintDebug(format, ...)` — Sierra's debug `printf`, into the log.
+   *
+   * Marked as a stub in Sierra's own interpreters and called anyway by
+   * Shivers; ScummVM formats the line and prints it to its debug channel, and
+   * the log is this engine's.
+   */
+  PrintDebug: (world, args) => {
+    const format = readString(world, args[0] ?? NULL_REG, true);
+    const line = formatSciString(format, args.slice(1), (value) => readString(world, value, true));
+    world.log(`PrintDebug: ${line}`);
+    return world.machine.acc;
+  },
+
+  /**
+   * `GetWindowsOption(option)` — a setting of the window the game runs in.
+   *
+   * Option 0 is whether the title bar shows, which Phantasmagoria asks; there
+   * is no Windows title bar here, so the answer is no. No other option is
+   * known to be asked, and one that is gets said once and answered nought.
+   */
+  GetWindowsOption: (world, args) => {
+    const option = args[0]?.offset ?? 0;
+    if (option !== 0) {
+      reportOnce(
+        world,
+        `GetWindowsOption.${option}`,
+        `GetWindowsOption was asked for option ${option}; only 0, the title bar, is known.`,
+      );
+    }
+    return NULL_REG;
+  },
+
+  /**
+   * `AddLine(plane, x1, y1, x2, y2, [priority, colour, style, pattern, thickness])`.
+   *
+   * SCI32 has no "draw a line" — it has screen items. `GfxPaint32::kernelAddLine`
+   * (`graphics/paint32.cpp`, fetched 2026-09-27) draws the line into a bitmap
+   * exactly its bounding box and hangs that bitmap on a new screen item of
+   * fixed priority, and the answer is that item, which the game later hands
+   * to `UpdateLine` and `DeleteLine`. The same here, through the bitmap and
+   * screen-item hooks every other SCI32 drawing call already uses.
+   *
+   * Without the five styling arguments a line is Sierra's default: priority
+   * 1000, colour 255, solid, one pixel.
+   */
+  AddLine: (world, args) => {
+    const id = world.heap.allocate(0);
+    const styled = args.length >= 10;
+    drawLine(world, id, args[0] ?? NULL_REG, args.slice(1, 5), {
+      priority: styled ? signed(args[5] ?? NULL_REG) : 1000,
+      colour: styled ? (args[6]?.offset ?? 0) & 0xff : 255,
+      style: styled ? signed(args[7] ?? NULL_REG) : SCI_LINE_STYLE.solid,
+      pattern: styled ? (args[8]?.offset ?? 0) : 0,
+      thickness: styled ? (args[9]?.offset ?? 0) & 0xff : 1,
+    });
+    return id;
+  },
+  /**
+   * `UpdateLine(line, plane, x1, y1, x2, y2, [priority, colour, style, pattern, thickness])`.
+   *
+   * Redraws into a fresh bitmap and frees the old one. Without styling it keeps
+   * the line's priority and colour — Sierra kept the colour on the screen item
+   * for exactly this — and goes back to solid and one pixel, as `kUpdateLine`
+   * does.
+   */
+  UpdateLine: (world, args) => {
+    const id = args[0] ?? NULL_REG;
+    const held = linesOf(world).get(planeId(id));
+    if (!held) {
+      world.log(`UpdateLine was handed ${planeId(id)}, which no AddLine made.`);
+      return world.machine.acc;
+    }
+    const styled = args.length >= 11;
+    drawLine(world, id, args[1] ?? NULL_REG, args.slice(2, 6), {
+      priority: styled ? signed(args[6] ?? NULL_REG) : held.priority,
+      colour: styled ? (args[7]?.offset ?? 0) & 0xff : held.colour,
+      style: styled ? signed(args[8] ?? NULL_REG) : SCI_LINE_STYLE.solid,
+      pattern: styled ? (args[9]?.offset ?? 0) : 0,
+      thickness: styled ? (args[10]?.offset ?? 0) & 0xff : 1,
+    });
+    return world.machine.acc;
+  },
+  /** `DeleteLine(line, plane)` — the screen item and its bitmap, both gone. */
+  DeleteLine: (world, args) => {
+    const id = planeId(args[0] ?? NULL_REG);
+    const held = linesOf(world).get(id);
+    if (held) {
+      world.deleteScreenItem?.(id);
+      world.bitmapDestroy?.(held.bitmap);
+      linesOf(world).delete(id);
+    }
+    return world.machine.acc;
   },
 
   /**
@@ -4821,8 +5250,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
         return NULL_REG;
     }
   },
-  Graph: () => int(0),
-  Palette: () => int(0),
   /**
    * Cel geometry, answered from the View the script names.
    *
@@ -4915,13 +5342,47 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     if (args.length < 2) return event;
     return shiftByPlane(world, event, args[1] ?? NULL_REG, 1);
   },
-  CoordPri: (_world, args) => {
+  CoordPri: (world, args) => {
     // Priority from a y coordinate: fourteen bands over the picture, which is
     // what puts an actor lower down the screen in front of one higher up.
-    const y = signed(args[0] ?? NULL_REG);
-    return int(Math.max(0, Math.min(14, Math.floor(((y - 42) * 14) / 148) + 1)));
+    // `Graph(AdjustPriority)` can move the bands; the default fourteen from 42
+    // to 190 are this formula's own, reproduced exactly.
+    return int(sciPriorityBands(world).coordinateToPriority(signed(args[0] ?? NULL_REG)));
   },
-  DirLoop: () => NULL_REG,
+  /**
+   * `DirLoop(actor, heading)` — face an actor the way it is heading.
+   *
+   * `kDirLoopWorker` (`kgraphics.cpp`, fetched 2026-09-27). A View's first
+   * four loops are right, left, toward the viewer and away, so a heading
+   * within 45 degrees of north picks loop 3, of south loop 2, and anything
+   * else loop 0 or 1 by which half of the circle it is in. SCI0 early's
+   * windows are 30 degrees rather than 45. Two refusals are Sierra's: an actor
+   * whose `signal` says it does not turn is left alone, and a View with fewer
+   * than four loops has no up or down to turn to and keeps the loop it has.
+   *
+   * Where the host has not read the actor's View yet it reports one loop, so
+   * a north or south heading leaves the loop alone until the View arrives —
+   * the refusal Sierra makes for a two-loop View, and a frame late rather
+   * than wrong.
+   */
+  DirLoop: (world, args) => {
+    const actor = world.machine.object(args[0] ?? NULL_REG);
+    if (!actor) return world.machine.acc;
+    if (readProperty(world, actor, 'signal') & SCI_SIGNAL_DOESNT_TURN) return world.machine.acc;
+
+    const heading = args[1]?.offset ?? 0;
+    const window = world.machine.version === 'sci0-early' ? 30 : 45;
+    let loop: number;
+    if (heading > 360 - window || heading < window) loop = 3;
+    else if (heading > 180 - window && heading < 180 + window) loop = 2;
+    else loop = heading >= 180 ? 1 : 0;
+
+    if (loop >= 2 && (world.viewLoopCount?.(args[0] ?? NULL_REG) ?? 0) < 4) {
+      return world.machine.acc;
+    }
+    setProperty(world, actor, 'loop', loop);
+    return world.machine.acc;
+  },
   /**
    * `CanBeHere(object)` — may this actor stand where it is?
    *
@@ -4941,11 +5402,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
    * control map forbids. That is a wrong picture, and a hang is not a picture
    * at all.
    */
-  CanBeHere: () => int(1),
-  CantBeHere: () => int(0),
-  OnControl: () => int(0),
-  SetJump: () => NULL_REG,
-  DoAvoider: () => int(0),
   /**
    * `AvoidPath(startX, startY, endX, endY, polygons, width, height[, opt])` —
    * a route from here to there, as a list of points.
@@ -5286,11 +5742,9 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
   },
 
   // -------------------------------------------------------------- menus ---
-  AddMenu: () => NULL_REG,
-  DrawMenuBar: () => NULL_REG,
-  MenuSelect: () => int(0),
-  GetMenu: () => int(0),
-  SetMenu: () => NULL_REG,
+  // `AddMenu`, `SetMenu`, `GetMenu`, `DrawMenuBar`, `DrawStatus` and
+  // `MenuSelect` are in `sciKernelRemaining.ts`, with the rest of the calls
+  // that needed a surface on the engine's side before they could be written.
 
   // ------------------------------------------------------- sound, parser ---
   /**
@@ -5338,7 +5792,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     }
     return doSound(world, op, args.slice(1));
   },
-  DoAudio: () => int(0),
   /**
    * `Parse(line, event)` — a typed command, against the game's own vocabulary.
    *
@@ -5365,18 +5818,25 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
    * that answers 1 and leaves `claimed` where it was hands every room a parse
    * they have no way to tell apart from a stale one.
    *
-   * **What this does not reach, stated rather than discovered.** `Said` still
-   * answers zero, so a parse that succeeds is a parse nothing matches against —
-   * see the note on `Said` for why that half is not in this run. ScummVM's
+   * **A parse that succeeds is kept for `Said`**, with the event it arrived
+   * on, the way Sierra's `Vocabulary` keeps `parser_event` and its tree: the
+   * room handlers that follow ask `Said` against exactly this line. A parse
+   * that fails clears it, so a stale sentence is never matched against.
+   * Synonyms the game installed with `SetSynonyms` are applied first, which is
+   * where `synonymizeTokens` sits in `kParse`.
+   *
+   * **What this does not reach, stated rather than discovered.** ScummVM's
    * tokenizer also strips suffixes through `vocab.901` and applies the GNF
    * grammar in `vocab.900`, and this reduction does neither: an inflected word
    * this project's vocabulary does not hold whole is an unknown word here and a
    * known one in Sierra's interpreter. `syntaxFail` is the grammar's failure
-   * and so cannot be reported either.
+   * and so cannot be reported either, and the sentence `Said` matches against
+   * is arranged from word classes rather than by that grammar (`sciSaid.ts`).
    */
   Parse: (world, args) => {
     const event = world.machine.object(args[1] ?? NULL_REG);
     const parsed = world.parseInput?.(readString(world, args[0] ?? NULL_REG, true)) ?? null;
+    parserState.delete(world);
 
     if (!parsed) {
       // Not an error: SCI1 replaced the parser with an icon bar and ships no
@@ -5408,10 +5868,112 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
     }
 
     setProperty(world, event, 'claimed', 0);
+    const synonyms = parserSynonyms.get(world);
+    const words = (parsed.words ?? []).map((word) => ({
+      ...word,
+      group: synonyms?.get(word.group) ?? word.group,
+    }));
+    parserState.set(world, {
+      event: args[1] ?? NULL_REG,
+      sentence: buildSentence(words),
+      classified: parsed.words !== undefined,
+    });
     return int(1);
   },
-  Said: () => int(0),
-  SetSynonyms: () => NULL_REG,
+
+  /**
+   * `Said(spec)` — is the line just parsed the sentence this spec names?
+   *
+   * **The other half of `Parse`, and it answered nought.** So every SCI0 and
+   * SCI01 game parsed a typed line correctly, released the event to its room
+   * handlers, and had every one of them told no — a parser game in which no
+   * typed command could ever do anything.
+   *
+   * `kSaid` (`engines/sci/engine/kparse.cpp`, fetched 2026-09-27) is the shape:
+   * a spec that is a number rather than an address is refused outright; so is
+   * any spec when there is no valid parse or its event is already claimed,
+   * which is what stops the second handler to match a line acting on it too. A
+   * full match claims the event and a `>` match does not — the partial form is
+   * how a room asks "is this any kind of look?" and then hands the event on to
+   * the handler that knows which. The spec and the matching are `sciSaid.ts`.
+   */
+  Said: (world, args) => {
+    const specRef = args[0] ?? NULL_REG;
+    if (specRef.segment === 0) return NULL_REG;
+    const parsed = parserState.get(world);
+    if (!parsed) return NULL_REG;
+    const event = world.machine.object(parsed.event);
+    if (event && readProperty(world, event, 'claimed') !== 0) return NULL_REG;
+
+    if (!parsed.classified) {
+      reportOnce(
+        world,
+        'Said.unclassified',
+        'Said was asked about a parse that carries no word classes, so which word is the ' +
+          'verb and which the object cannot be told. It answered no.',
+      );
+      return NULL_REG;
+    }
+    const bytes = bytesAt(world, specRef);
+    const spec = bytes ? readSaidSpec((index) => bytes.get(index), bytes.length) : null;
+    if (!spec) {
+      reportOnce(
+        world,
+        `Said.${specRef.segment}:${specRef.offset}`,
+        `Said was handed ${specRef.segment}:${specRef.offset}, which does not read as a said ` +
+          `block — no terminator within Sierra's 128 tokens, or an operator where a word ` +
+          `belongs. Either the address is wrong or the block is, and it answered no.`,
+      );
+      return NULL_REG;
+    }
+
+    const verdict = matchSaid(parsed.sentence, spec);
+    if (verdict === 'no') return NULL_REG;
+    if (verdict === 'full') setProperty(world, event, 'claimed', 1);
+    return int(1);
+  },
+
+  /**
+   * `SetSynonyms(regions)` — the synonyms each script in play declares.
+   *
+   * A SCI0 script can carry a `synonyms` block: pairs of word groups, the first
+   * to be read as the second while that script is in play, so a room can make
+   * "boulder" mean "rock" without the vocabulary knowing. The game calls this
+   * with the set of scripts in play — its `regions`, whose `elements` each name
+   * a script by `number` — and `kSetSynonyms` replaces every synonym held with
+   * theirs (`kparse.cpp`). `Parse` applies them.
+   *
+   * Only SCI0 and SCI1 scripts are read as blocks. SCI1.1 split a script into
+   * code and heap and its synonyms left with the parser; reading its code as a
+   * block chain would find "synonyms" in whatever bytes happened to line up.
+   */
+  SetSynonyms: (world, args) => {
+    const synonyms = new Map<number, number>();
+    parserSynonyms.set(world, synonyms);
+    const regions = world.machine.object(args[0] ?? NULL_REG);
+    if (!regions || !before(world.machine.version, 'sci1-1')) {
+      return world.machine.acc;
+    }
+
+    const list = world.heap.list(readPropertyReg(world, regions, 'elements'));
+    for (let node = list?.first ?? NULL_REG; !isNull(node);) {
+      const held = world.heap.node(node);
+      const element = world.machine.object(held?.value ?? NULL_REG);
+      const code = element
+        ? world.machine.scriptBytes(readProperty(world, element, 'number'))
+        : null;
+      if (code) {
+        for (const block of readSci0Blocks(code, sci0ScriptBias(code))) {
+          if (block.type !== 'synonyms') continue;
+          for (let at = block.offset; at + 4 <= block.offset + block.size; at += 4) {
+            synonyms.set(code[at] | (code[at + 1] << 8), code[at + 2] | (code[at + 3] << 8));
+          }
+        }
+      }
+      node = held?.next ?? NULL_REG;
+    }
+    return world.machine.acc;
+  },
 
   // --------------------------------------------------------------- files ---
   /*
@@ -5503,7 +6065,6 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
   RestoreGame: (world, args) => {
     return int(world.restoreGame?.(args[1]?.offset ?? 0) ? 1 : 0);
   },
-  RestartGame: () => NULL_REG,
   /**
    * `FileIO(sub, ...)` — the twenty sub-functions SCI1 folded SCI0's four into.
    *
@@ -5666,6 +6227,33 @@ export const SCI_KERNEL: Readonly<Record<string, Handler>> = {
         return failed;
     }
   },
+
+  // The last of them: menus, the status line, the shake, SCI16's direct
+  // drawing, portraits, and SCI32's windows, dialogs and odd corners.
+  ...createRemainingKernel({
+    readString,
+    putString,
+    bytesAt,
+    readProperty,
+    readPropertyReg,
+    hasProperty,
+    setProperty,
+    reportOnce,
+    said: (world, spec) => !isNull(SCI_KERNEL.Said(world, [spec])),
+    kernel: (name) => SCI_KERNEL[name],
+  }),
+  ...createLeftoverKernel({
+    readString,
+    putString,
+    bytesAt,
+    readProperty,
+    readPropertyReg,
+    hasProperty,
+    setProperty,
+    reportOnce,
+    said: (world, spec) => !isNull(SCI_KERNEL.Said(world, [spec])),
+    kernel: (name) => SCI_KERNEL[name],
+  }),
 };
 
 /** Reads a null-terminated string from wherever a reference points. */
@@ -6225,6 +6813,214 @@ function englishHalf(text: string): string {
  */
 function planeId(value: Reg): string {
   return `${value.segment}:${value.offset}`;
+}
+
+/**
+ * The disc a session believes is in the drive, which `CheckCDisc` sets.
+ *
+ * Keyed by the machine rather than the world: the machine is the running
+ * session, and a restart that makes a new one starts again from disc one.
+ */
+const currentDisc = new WeakMap<PMachine, number>();
+
+/**
+ * What `GetConfig` answers for the settings a shipped game is known to read.
+ *
+ * ScummVM's list (`kmisc.cpp`, fetched 2026-09-27). The three benchmarks are
+ * above Phantasmagoria's threshold of 425, `586` is the fastest CPU its CPUID
+ * could report, `language` is SCI's code for English, and the rest are debug
+ * and start-up switches a shipped game leaves unset.
+ */
+const SCI_CONFIG_ANSWERS: Readonly<Record<string, string>> = {
+  videospeed: '500',
+  cpu: '586',
+  cpuspeed: '500',
+  language: '1',
+  torindebug: '',
+  leakdump: '',
+  startroom: '',
+  game: '',
+  laptop: '',
+  jumpto: '',
+  klonchtsee: '',
+  klonchtarr: '',
+  deflang: '',
+};
+
+/**
+ * Writes a string into whatever a script handed over for one.
+ *
+ * SCI32 hands over a `String` — a byte array that grows to fit, as
+ * `SciArray::fromString` does — and SCI16 a buffer of fixed size, which
+ * `writeString` fills without running past.
+ */
+function putString(world: SciKernelWorld, target: Reg, text: string): void {
+  if (world.heap.arrayType(target) === null) {
+    writeString(world, target, text);
+    return;
+  }
+  world.heap.arrayResize(target, text.length + 1);
+  for (let i = 0; i < text.length; i++) world.heap.arrayPut(target, i, text.charCodeAt(i));
+  world.heap.arrayPut(target, text.length, 0);
+}
+
+/** `LineStyle`, from `graphics/paint32.h`. */
+const SCI_LINE_STYLE = { solid: 0, dashed: 1, pattern: 2 } as const;
+
+/** SCI32's default skip colour, which a line's bitmap is cleared to. */
+const SCI32_DEFAULT_SKIP = 250;
+
+interface SciLineStyle {
+  priority: number;
+  colour: number;
+  style: number;
+  pattern: number;
+  thickness: number;
+}
+
+/** An actor's `signal` bit saying it keeps its loop whatever its heading. */
+const SCI_SIGNAL_DOESNT_TURN = 0x0800;
+
+/** How many saves `GetSaveFiles` lists, and how many bytes each name takes. */
+const SCI_MAX_SAVES = 20;
+const SCI_SAVE_NAME_LENGTH = 36;
+
+/** The lines `AddLine` made, by screen-item id, with what `UpdateLine` keeps. */
+const lines = new WeakMap<
+  SciKernelWorld,
+  Map<string, { bitmap: number; priority: number; colour: number }>
+>();
+
+function linesOf(
+  world: SciKernelWorld,
+): Map<string, { bitmap: number; priority: number; colour: number }> {
+  let held = lines.get(world);
+  if (!held) {
+    held = new Map();
+    lines.set(world, held);
+  }
+  return held;
+}
+
+/**
+ * Draws a line into a bitmap and puts it on a Plane, as `makeLineBitmap` does.
+ *
+ * Three details are Sierra's and are kept (`graphics/paint32.cpp`):
+ *
+ * - **thickness is odd**, `2n + 1`, and the bitmap grows by `n` on every side
+ *   so a thick line is not clipped by its own box;
+ * - **the bitmap is cleared to the skip colour**, 250 unless the line is itself
+ *   250, so only the line shows;
+ * - **a pattern runs along the major axis**, one bit per step from the top
+ *   bit, sixteen steps a repeat — and "dashed" is the pattern `0xff00`.
+ *
+ * A thick line is stamped as a square at every point rather than traced as
+ * Sierra's parallel lines; the two differ by a pixel at the ends of a
+ * diagonal, and that is the one liberty taken.
+ */
+function drawLine(
+  world: SciKernelWorld,
+  id: Reg,
+  plane: Reg,
+  ends: Reg[],
+  line: SciLineStyle,
+): void {
+  if (!world.bitmapCreate || !world.bitmapFill || !world.addScreenItem) {
+    reportOnce(
+      world,
+      'AddLine.surface',
+      'The game drew a line and this host offers no bitmaps to draw it into, so it was not drawn.',
+    );
+    return;
+  }
+  const [x1, y1, x2, y2] = [0, 1, 2, 3].map((index) => signed(ends[index] ?? NULL_REG));
+  const thickness = (Math.max(1, line.thickness) - 1) | 1;
+  const half = thickness >> 1;
+  const left = Math.max(0, Math.min(x1, x2) - half);
+  const top = Math.max(0, Math.min(y1, y2) - half);
+  const width = Math.max(x1, x2) + 1 + half - left;
+  const height = Math.max(y1, y2) + 1 + half - top;
+  const skip = line.colour !== SCI32_DEFAULT_SKIP ? SCI32_DEFAULT_SKIP : 0;
+
+  const key = planeId(id);
+  const previous = linesOf(world).get(key);
+  if (previous) world.bitmapDestroy?.(previous.bitmap);
+  const bitmap = world.bitmapCreate(Math.max(0, width), Math.max(0, height), skip, skip);
+
+  const pattern =
+    line.style === SCI_LINE_STYLE.dashed
+      ? 0xff00
+      : line.style === SCI_LINE_STYLE.pattern
+        ? line.pattern & 0xffff
+        : 0xffff;
+  const dx = Math.abs(x2 - x1);
+  const dy = Math.abs(y2 - y1);
+  const stepX = x1 < x2 ? 1 : -1;
+  const stepY = y1 < y2 ? 1 : -1;
+  let error = dx - dy;
+  let x = x1;
+  let y = y1;
+  for (let step = 0; ; step++) {
+    if (pattern & (0x8000 >> (step % 16))) {
+      world.bitmapFill(
+        bitmap,
+        x - half - left,
+        y - half - top,
+        x + half + 1 - left,
+        y + half + 1 - top,
+        line.colour,
+      );
+    }
+    if (x === x2 && y === y2) break;
+    const doubled = error * 2;
+    if (doubled > -dy) {
+      error -= dy;
+      x += stepX;
+    }
+    if (doubled < dx) {
+      error += dx;
+      y += stepY;
+    }
+  }
+
+  linesOf(world).set(key, { bitmap, priority: line.priority, colour: line.colour });
+  world.addScreenItem(key, planeId(plane), {
+    view: 0xffff,
+    loop: 0,
+    cel: 0,
+    x: left,
+    y: top,
+    priority: line.priority,
+    bitmap,
+  });
+}
+
+/**
+ * `ListAt(list, index)`: the value at a position, which SCI16 has no call for.
+ *
+ * Walked rather than added to the heap, because an index into a linked list is
+ * a walk however it is spelled. Past the end is nought, as `kListAt` has it.
+ */
+function listAt(world: SciKernelWorld, args: Reg[]): Reg {
+  let node = world.heap.list(args[0] ?? NULL_REG)?.first ?? NULL_REG;
+  for (let i = args[1]?.offset ?? 0; i > 0 && !isNull(node); i--) {
+    node = world.heap.node(node)?.next ?? NULL_REG;
+  }
+  return world.heap.node(node)?.value ?? NULL_REG;
+}
+
+/** `ListIndexOf(list, value)`: where a value is, or -1 when it is not there. */
+function listIndexOf(world: SciKernelWorld, args: Reg[]): Reg {
+  const wanted = args[1] ?? NULL_REG;
+  let node = world.heap.list(args[0] ?? NULL_REG)?.first ?? NULL_REG;
+  for (let index = 0; !isNull(node); index++) {
+    const value = world.heap.node(node)?.value ?? NULL_REG;
+    if (value.segment === wanted.segment && value.offset === wanted.offset) return int(index);
+    node = world.heap.node(node)?.next ?? NULL_REG;
+  }
+  // Sierra's own answer for "not in the list", and not zero, which is a valid
+  // index.
+  return int(0xffff);
 }
 
 /**

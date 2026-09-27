@@ -254,19 +254,40 @@ calls with behaviour, calls that answer the same value whatever a game passes
 them, calls answered by the stub for the slots Sierra shipped and no retail game
 makes, and calls that are absent. The constant column is the one that changes
 the reading — `DoSound`, `Parse`, `Said`, `SaveGame` and `RestoreGame` were each
-`() => int(0)` when that column was first measured, and only `Said` still is —
+`() => int(0)` when that column was first measured, and none of them is now —
 because a missing call reports itself the first time a game makes it and a
-constant is silent. At SCI2, 80 of 150 named calls have behaviour and 28 more
-answer a constant, so **the distance to a game that runs is larger than the
-missing count and always was**.
+constant is silent. When that paragraph was first written, 103 of SCI2's 150
+named calls had behaviour and 24 more answered a constant, so **the distance to
+a game that runs was larger than the missing count and always was**.
 
-**Nothing is absent from any SCI0 or SCI1 table.** Their file calls, and the
-four SCI1 calls that each needed a hook into the engine — a palette loader, a
-cel's pixels and its clear key, the resource map, the text-code font store —
-are answered, so no script in any of those Versions can name a call this engine
-has never heard of. **SCI1.1 has one left**, `Portrait` — the talking-head
-surface, with its own resource kind and its own audio sync. SCI2 through SCI3
-have between 33 and 35, which is the SCI32 compositor and little else.
+**Since then, nothing is absent from any Version's table, and the constant
+column has been reviewed name by name.** The published rows (named /
+implemented / constant / unused stub / missing) now read:
+
+| Version                 | named | implemented | constant | unused stub | missing |
+| ----------------------- | ----- | ----------- | -------- | ----------- | ------- |
+| SCI0, SCI01             | 112   | 102         | 4        | 6           | 0       |
+| SCI1 (early, late), 1.1 | 137   | 118         | 7        | 12          | 0       |
+| SCI2                    | 150   | 121         | 9        | 20          | 0       |
+| SCI2.1 (all three)      | 123   | 98          | 8        | 17          | 0       |
+| SCI3                    | 122   | 96          | 9        | 17          | 0       |
+
+What closed the last of them: SCI16's menus and status line (`AddMenu`,
+`SetMenu`, `GetMenu`, `DrawMenuBar`, `DrawStatus`, `MenuSelect`),
+`ShakeScreen`, `Graph`, `Palette`, `AddToPic`, `DrawCel` and `OnControl`, out
+of the constant column; SCI1.1's `Portrait`, with its rave lip-sync; `DoAudio`
+with every sub-function, `RestartGame`, `SetJump`, `HiliteControl` and the
+collision calls; and SCI32's remainder — `InputText` drawn, `MessageBox`,
+`MovePlaneItems`, `ScrollWindow`, `CelLink`, `MorphOn`, `SetHotRectangles`,
+`SetGamma` and Hoyle 5's poker DLL. **What is still constant is what ScummVM
+answers with a constant too** — `HaveMouse`, `ValidPath`, `SetVideoMode`,
+`Joystick` and the like at SCI16; `NewRoom`, `SetWindowsOption`,
+`VibrateMouse`, `Purge` and `ShowStylePercent` at SCI32 — each named with its
+reason in `SciKernel.ts`. Two limits remain and are stated
+rather than hidden: `Platform` always answers DOS, because nothing tells the
+kernel a release is Windows or Macintosh; and `DoAudio`'s Red Book CD audio is
+named once in the log and not played, while SCI32's pan is accepted and changes
+nothing that can be heard.
 
 **Two of those numbers came down without any code being written, and that is
 worth saying.** Seventeen names counted as absent at SCI32 are `MAP_DUMMY` in
@@ -318,13 +339,20 @@ and halted four layers from the cause. It took a game that walks the chain on
 its boot path to show it; no fixture here does.
 
 **Zero missing is not "SCI0 runs", and the gap that is left is the quiet one.**
-Thirty of SCI0's calls still answer a constant whatever a game passes them, so a
-SCI0 game reaches every name it asks for and gets silence from several that
-matter. `SaveGame` and `RestoreGame` left that column when the object-graph
-capture this project already had was finally reached from a game's own save
-menu; `Parse` left it when the parser this repository already had was finally
-called from the machine, and `Said` has not, so a typed line is now understood
-and still matches no said-spec.
+When this was first written, twenty-five of SCI0's calls still answered a
+constant whatever a game passed them, so a SCI0 game reached every name it asked
+for and got silence from several that mattered; since then that column is down
+to four — `FlushResources`, `HaveMouse`, `SetDebug` and `ValidPath`, each
+answered the way ScummVM answers it — and the quiet gap that is left is the
+Said grammar and the music below. `SaveGame` and `RestoreGame` left that
+column when the object-graph capture this project already had was finally
+reached from a game's own save menu; `Parse` left it when the parser this
+repository already had was finally
+called from the machine; and `Said` left it with a said-spec matcher of its own
+(`sciSaid.ts`), with `SetSynonyms` applying a room's synonyms to the parse.
+The matcher arranges a sentence by word class rather than by the `vocab.900`
+grammar, so the specs that depend on a parse tree's depth do not match yet — it
+reproduces the worked examples in ScummVM's `said.cpp` that do not.
 
 **`DoSound` left that column too, and it is the one worth being precise about.**
 It is a real sub-function dispatcher now — the four sound-version numberings, so
@@ -335,8 +363,11 @@ the same integer names the call the Version means by it — and it keeps the
 one ScummVM would treat as having no data for the selected device, and its own
 third branch of `processUpdateCues` is what this follows: the cue reports
 finished. That is a call with behaviour and it is not sound. Nothing here plays
-a note, and a game whose timing depends on how long a tune actually lasts is
-being told the tune is over.
+a note of sequenced music, and a game whose timing depends on how long a tune
+actually lasts is being told the tune is over. Digital audio is another call:
+`DoAudio` now decodes Sierra's SOL samples and plays speech and effects through
+the page's `AudioContext` (`sciAudioPlayer.ts`), with the play clock scripts
+poll running whether or not anything is heard.
 
 **What is not.** Nothing below is a `Completable` claim, which is the bar
 `CONTEXT.md` sets for support, and none is close to one. Sixteen of the 25 demos
@@ -428,7 +459,10 @@ while `Animate`, `Wait` and `GetTime` each climb about fivefold — so the room
 animates but does not change. Part of that, though, is the tool disturbing what
 it measures: `--play` keeps pressing Enter and clicking every forty cycles
 _after_ the dialog has closed, which the throne room reads as sixty-one calls to
-`RestartGame` (a no-op stub here, silently dropped). Left silent instead after
+`RestartGame` (a no-op stub when this was measured, silently dropped;
+`RestartGame` has since
+been implemented, so the same run would now restart the game sixty-one times).
+Left silent instead after
 the answer, that count is zero, one narration window opens (`NewWindow` two →
 three) and the cast grows from ten to twelve — the scene is alive and slowly
 populating, not spinning on a clock. So the honest reading is narrower than "a
@@ -679,7 +713,7 @@ has is ScummVM's, and reading it is refused. That is now three famous engines
 waiting on one decision — see
 [`scummvm-parity-roadmap.md`](scummvm-parity-roadmap.md).
 
-### Sky — Virtual Theatre v2 (1994) — reaches a room; nothing plays yet
+### Sky — Virtual Theatre v2 (1994) — reaches a room and walks in it; not playable
 
 - Beneath a Steel Sky — DOS floppy, DOS CD (with recorded speech), and the demo
 
@@ -1116,12 +1150,13 @@ table of the **original** Releases, which is a smaller claim again.
 
 ## SLUDGE — reads and disassembles; no interpreter, so nothing runs
 
-The seventh Engine family, and the only one on this page with **no support
-claim at all**. It is here because a family with a reader and no interpreter is
+A ninth Engine family in waiting — Sword1 and Sword2 became the seventh and
+eighth (ADR 0036) — and the only one on this page with **no support claim at
+all**. It is here because a family with a reader and no interpreter is
 invisible otherwise, which is the drift `families.ts` was written to prevent —
 and `README.md` names it for the same reason.
 
-**SLUDGE is not like the other six, and the difference decides everything about
+**SLUDGE is not like the other eight, and the difference decides everything about
 this section.** The others are each a _publisher's_ engine, so each has a
 Version axis or a Release axis and a fixed catalogue. SLUDGE is an _authoring
 system's_ engine: its games are named after whatever their authors called them,
@@ -1136,8 +1171,8 @@ such a table is never transcribed.
 **What is not.** An interpreter. So SLUDGE data stays in
 [`engineSignatures.ts`](../src/engine/resource/engineSignatures.ts) and out of
 `IMPLEMENTED_FAMILIES`, and a dropped SLUDGE game is refused by name rather
-than run. The bar for joining the six is having an interpreter's foundation,
-which five families crossed in turn, and a reader is not one.
+than run. The bar for joining the eight is having an interpreter's foundation,
+which seven families crossed in turn after SCUMM, and a reader is not one.
 
 **What it was checked against, which is unusually strong for a new family
 here.** Above The Waves, a freeware SLUDGE 2.2 game — so a real shipped game
@@ -1809,7 +1844,7 @@ for is refused before anything is written, because one with no length decodes
 as whatever follows it — the cost of that mistake is a whole unreadable line
 rather than one wrong instruction.
 
-**Art is now read, drawn and painted — and cannot yet be saved.** A zone's
+**Art is read, drawn, painted and saved.** A zone's
 images are listed in the Project, opened onto a canvas, and painted a pixel at
 a time, with each edit recorded as **intent** rather than as bytes: ADR 0030 has
 an AGOS Project hold what the author meant and ask for the game folder again at
@@ -1830,19 +1865,19 @@ which is AGI's, and which ADR 0029 records that AGOS deliberately does not
 have. The route is now a capability on the seam rather than a family check in
 the shell, which is what ADR 0011 asks for.
 
-**Nothing calls it, because AGOS export writes only `GAMEPC`.** ADR 0030
-requires the two artefacts together — the rebuilt base file _and_ the rebuilt
-archive — "one operation that either produces both or produces neither", and
-the archive half does not exist. So a painted image survives in a saved project
-and does not yet reach a game folder, and a partial archive writer would be a
-wrong artefact rather than a missing one. That writer is the remaining work on
-this half, and it is a subsystem rather than a wiring job: an offset table
-rebuilt per packaging layout, loose `.VGA` files for the old bundle and a
-packed `.gme` for the rest.
+**The export writes both halves.** ADR 0030 requires the two artefacts
+together — the rebuilt base file _and_ the rebuilt archive — "one operation
+that either produces both or produces neither". This section used to say the
+archive half did not exist; it does now, in
+[`archive.ts`](../src/authoring/agos/archive.ts), which rebuilds the offset
+table and replays `applyPaintedImages` onto the re-supplied bytes, and
+`exportAgos.ts` calls it on Save, Export game and Play. So a painted image
+reaches the game folder, and an unedited game comes back out byte for byte.
 
-The canvas is also greyscale, and deliberately: an AGOS image's colours come
-from a bank a _script_ chooses at draw time, so an image on its own has no one
-right palette and inventing one would show colours the game never uses.
+The canvas's colours are the zone's own: an AGOS image's colours come from a
+bank a _script_ chooses at draw time, so the banks the zone carries are offered
+on the toolbar and the author picks. A zone with no palette of its own is shown
+in greys, and says so, rather than in colours the game never uses.
 
 The VGA script machine, which is what places a game's sprites — a game
 Subroutine's whole contribution to the screen is to start one of its scripts.
@@ -1866,22 +1901,23 @@ Version, and they say opposite things:
 
 | Version    | Game opcodes  | VGA script opcodes |
 | ---------- | ------------- | ------------------ |
-| Elvira1    | **142 / 142** | 38 / 56            |
-| Elvira2    | **153 / 153** | 49 / 63            |
-| Waxworks   | **145 / 145** | 49 / 63            |
-| Simon1     | **133 / 133** | **62 / 62**        |
-| Simon2     | **132 / 132** | 60 / 73            |
-| Feeble     | **149 / 149** | 62 / 83            |
-| PuzzlePack | **142 / 142** | 62 / 83            |
+| Elvira1    | **142 / 142** | **41 / 41**        |
+| Elvira2    | **153 / 153** | **58 / 58**        |
+| Waxworks   | **145 / 145** | **62 / 62**        |
+| Simon1     | **133 / 133** | **55 / 55**        |
+| Simon2     | **132 / 132** | **68 / 68**        |
+| Feeble     | **149 / 149** | **78 / 78**        |
+| PuzzlePack | **142 / 142** | **78 / 78**        |
 
-**The game opcodes are complete on every Version**, and the **VGA script
-machine** is now complete on Simon 1 and between 68% and 78% elsewhere. A game
+**The game opcodes are complete on every Version, and so is the VGA script
+machine** — measured against the opcodes each Version's reference dispatch
+actually installs (see the denominator note below). A game
 Subroutine's only contribution to the screen is to start one of these scripts,
 so the number in the right-hand column is the ceiling on what an AGOS game can
 put in front of a player, whatever the left-hand column says.
 
 **Two things that number does not mean.** The first is that a right-hand column
-reading `62 / 62` makes a game playable. About a third of Simon 1's VGA opcodes
+reading full makes a game playable. About a third of Simon 1's VGA opcodes
 ask about things a renderer does not own — items, hit areas, speech, the
 animation table — and they reach them through a **host seam**
 (`gfx/vgaHost.ts`). Under a running game that seam is answered by
@@ -1909,15 +1945,25 @@ So the honest sentence is that Simon 1's drawing bytecode runs and its actors
 can be walked along the routes its scripts draw. What it still cannot do is make
 a sound effect, which is one resource reader rather than an opcode gap.
 
-The second is that the denominator is right. These tables are generated from
-ScummVM's **debugger** header, which names an opcode for every slot, while
-behaviour lives in a **dispatch** table assembled per Version — and the two
-disagree. Simon 1's dispatch has no entry at opcode 28, which the debugger names
-`PLAY_SOUND`; only Elvira 2 and Waxworks install it. So a Version's real
-instruction set is smaller than its row's denominator, by an amount nobody here
-has counted yet.
+The second is that the denominator is right, and it used not to be. These
+tables are generated from ScummVM's **debugger** header, which names an opcode
+for every slot, while behaviour lives in a **dispatch** table assembled per
+Version — and the two disagree. Simon 1's dispatch has no entry at opcode 28,
+which the debugger names `PLAY_SOUND`; only Elvira 2 and Waxworks install it.
+That difference is now counted rather than left open:
+[`vgaReferenceSlots.ts`](../src/engine/agos/gfx/vgaReferenceSlots.ts) lists,
+per Version, the slots the reference's setup chain leaves empty, the coverage
+test leaves them out of each total, and a script that reaches one is reported by
+name as having no handler in the reference. That is why Simon 1's denominator
+fell from 62 to 55 and Elvira 1's from 56 to 41.
 
-Simon 1 was the cheapest of the seven by a small margin, and is now the one
+What the newly covered opcodes do, and where each stops short, is in their own
+comments in `VgaMachine.ts`: the Elvira 2 and Waxworks dissolves land on their
+end state rather than animating, Feeble's looping sounds and path values reach
+the host seam and are reported there as unsupported, and `WAIT_END` sees only
+its own zone's sprites.
+
+Simon 1 was the cheapest of the seven by a small margin, and was the first
 Version with no VGA opcodes left. It is also the Version with real data to check
 against, since its DOS demo is freely redistributable.
 
@@ -2110,12 +2156,13 @@ frame 14,628:
 - **Nobody has played this game through**, which is the whole of what
   `Completable` asks and the reason it is not claimed.
 - **The other six Versions have not moved.** They read, decompile, re-emit
-  byte-identically and run every game opcode, and their drawing tables are
-  between 68% and 78% covered. Everything in this section is Simon 1's.
+  byte-identically and run every game opcode, and every VGA opcode their
+  reference installs. Everything else in this section is Simon 1's.
 
 **What is still missing family-wide.** The Elvira menus and Feeble's interface,
-beyond the plumbing that would carry their events. The remaining VGA opcodes on
-six Versions.
+beyond the plumbing that would carry their events, and the subsystems a few
+VGA opcodes reach through the host and find missing — Feeble's looping sounds
+and path values.
 
 **What it has now been tested against.** Adventure Soft's demos are freely
 redistributable and ScummVM collects them, so `npm run fetch:agos` fetches them

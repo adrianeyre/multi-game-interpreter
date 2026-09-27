@@ -905,13 +905,61 @@ export class ScriptEngine extends StackScriptEngine {
      * A counted list rather than a sub-opcode byte, so nothing about the code
      * stream depends on which operation it is — and the stack cannot
      * misalign either, because the list carries its own length. That makes
-     * these the two safest families to leave unimplemented, which is what they
-     * are: the getter pushes zero so the instruction that reads its answer
-     * still finds one.
+     * these the two safest families to leave mostly unimplemented, which is
+     * what they are: the getter pushes zero so the instruction that reads its
+     * answer still finds one.
+     *
+     * The setter's shadow-palette and blast-object calls are served, because
+     * COMI's translucency (shadow mode 3) reads tables only 108/109 build and
+     * draws through objects only 118/119 queue.
      */
     this.dispatch[0xba] = function () {
       const args = this.popList(30);
-      this.reportUnknownSubOpcode('kernelSetFunctions', args[0] ?? 0, 'stack');
+      switch (args[0]) {
+        case KERNEL_SET_V8.BuildPaletteShadow:
+          // `(slot, r, g, b, startColor, endColor)`: v7's order, slot first
+          // (`o8_kernelSetFunctions` 108, `buildPaletteShadow`).
+          this.engine.setShadowPaletteSlot(
+            args[1] ?? 0,
+            args[2] ?? 0,
+            args[3] ?? 0,
+            args[4] ?? 0,
+            args[5] ?? 0,
+            args[6] ?? 0,
+          );
+          break;
+        case KERNEL_SET_V8.SetPaletteShadow:
+          // The same against table 0, with the slot left out (109,
+          // `setPaletteShadow`).
+          this.engine.setShadowPaletteSlot(
+            0,
+            args[1] ?? 0,
+            args[2] ?? 0,
+            args[3] ?? 0,
+            args[4] ?? 0,
+            args[5] ?? 0,
+          );
+          break;
+        case KERNEL_SET_V8.BlastShadowObject:
+        case KERNEL_SET_V8.SuperBlastObject:
+          // Object, x, y, width, height, x and y scale, image: v7's eight
+          // arguments, and the same split — 118 shades in mode 3, 119 paints
+          // (`blastShadowObject` and `superBlastObject`).
+          this.engine.enqueueBlastObject(
+            args[1] ?? 0,
+            args[2] ?? 0,
+            args[3] ?? 0,
+            args[4] ?? 0,
+            args[5] ?? 0,
+            args[6] ?? 255,
+            args[7] ?? 255,
+            args[8] ?? 1,
+            args[0] === KERNEL_SET_V8.BlastShadowObject ? 3 : 0,
+          );
+          break;
+        default:
+          this.reportUnknownSubOpcode('kernelSetFunctions', args[0] ?? 0, 'stack');
+      }
     };
 
     this.dispatch[0xd8] = function () {
@@ -937,6 +985,17 @@ export class ScriptEngine extends StackScriptEngine {
     };
   }
 }
+
+/**
+ * The `kernelSetFunctions` operations v8 serves, by the number its scripts
+ * pass first (`o8_kernelSetFunctions` in ScummVM's `script_v8.cpp`).
+ */
+const KERNEL_SET_V8 = {
+  BuildPaletteShadow: 108,
+  SetPaletteShadow: 109,
+  BlastShadowObject: 118,
+  SuperBlastObject: 119,
+} as const;
 
 /** Named for the engine, which selects an interpreter by Version. */
 export { ScriptEngine as ScriptEngineV8 };

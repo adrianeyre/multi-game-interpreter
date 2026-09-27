@@ -485,9 +485,16 @@ export class ScriptEngine extends ClassicScriptEngine {
 
   /** `roomOps`: two operands and *then* a sub-opcode byte, in that order. */
   protected o_roomOpsV2(): void {
-    this.getVarOrDirectByte(PARAM_1);
-    this.getVarOrDirectByte(PARAM_2);
+    const colour = this.getVarOrDirectByte(PARAM_1);
+    const slot = this.getVarOrDirectByte(PARAM_2);
     const subOp = this.fetchByte();
+    // Sub-opcode 2 is room colour, the same remap v3 and v4 write with words
+    // (`o2_roomOps`). v1's form, which sets three fixed slots instead, is not
+    // a version this reads.
+    if ((subOp & 0x1f) === 2) {
+      this.engine.setRoomColour(slot, colour);
+      return;
+    }
     this.reportUnknownSubOpcode('roomOps', subOp);
   }
 

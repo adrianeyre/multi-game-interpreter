@@ -31,6 +31,41 @@ export class Palette {
 
   private dirty = true;
 
+  /**
+   * An index-to-index map applied when the colours are uploaded, or null.
+   *
+   * v3 and v4 display index *i* as colour `outputRemap[i]` (`_shadowPalRemap`
+   * in the reference's `updatePalette`): their shadow palette is a whole-screen
+   * substitution rather than something a sprite shades through. Held by
+   * reference, so a slot written into the table shows up at the next flush
+   * once `markDirty` says so.
+   */
+  private outputRemap: Uint8Array | null = null;
+
+  /**
+   * Told whenever a cycle rotates, so a table that names palette indices can
+   * rotate with it (the shadow palette's `doCycleIndirectPalette`).
+   */
+  onCycle: ((start: number, end: number, direction: number) => void) | null = null;
+
+  /**
+   * How the room's cycles are advanced, which is a property of the version.
+   *
+   * - `'rotate'`, from v5: each cycle waits out its delay and then rotates
+   *   the colours themselves.
+   * - `'table'`, v4: nothing in the palette moves. Each step hands every
+   *   cycle to `onTableCycle`, which rewrites the upload-time remap instead
+   *   (`cyclePalette`'s `GF_SMALL_HEADER` branch; see
+   *   `ShadowPalette.advanceSmallHeaderCycle`).
+   * - `'none'`, v3 and earlier: the reference only calls `cyclePalette` from
+   *   v4 on (`scummLoop_handleEffects`), so a v3 room's cycle table is read
+   *   and never run.
+   */
+  cycleStyle: 'rotate' | 'table' | 'none' = 'rotate';
+
+  /** Advances one cycle when `cycleStyle` is `'table'`. */
+  onTableCycle: ((cycle: ColorCycle) => void) | null = null;
+
   constructor() {
     for (let i = 0; i < 256; i++) this.rgba[i * 4 + 3] = 255;
   }
@@ -73,6 +108,23 @@ export class Palette {
 
   getColor(index: number): [number, number, number] {
     return [this.current[index * 3], this.current[index * 3 + 1], this.current[index * 3 + 2]];
+  }
+
+  /**
+   * A colour as the room's palette gives it, before cycling moved it.
+   *
+   * What the v5/v6 shadow palette is built from: the reference reads the room
+   * resource's own palette there (`getPalettePtr`), not the working copy, so a
+   * table built mid-cycle does not bake one frame of the water into it.
+   */
+  getBaseColor(index: number): [number, number, number] {
+    return [this.base[index * 3], this.base[index * 3 + 1], this.base[index * 3 + 2]];
+  }
+
+  /** Installs (or, with null, removes) the upload-time remap. */
+  setOutputRemap(remap: Uint8Array | null): void {
+    this.outputRemap = remap;
+    this.dirty = true;
   }
 
   /**
@@ -209,6 +261,15 @@ export class Palette {
    * otherwise lose a fraction of a step every rotation and drift slow.
    */
   step(jiffies = 1): void {
+    if (this.cycleStyle === 'none') return;
+    if (this.cycleStyle === 'table') {
+      // Once per step whatever its length: a small-header cycle runs at the
+      // frame rate, and its delay only said whether the slot was live.
+      for (const cycle of this.cycles) this.onTableCycle?.(cycle);
+      if (this.cycles.length > 0) this.dirty = true;
+      return;
+    }
+
     const amount = Math.max(1, jiffies);
     for (const cycle of this.cycles) {
       if (cycle.delay === 0) continue;
@@ -216,6 +277,7 @@ export class Palette {
       if (cycle.counter < cycle.delay) continue;
       cycle.counter %= cycle.delay;
       this.rotate(cycle.start, cycle.end, cycle.direction);
+      this.onCycle?.(cycle.start, cycle.end, cycle.direction);
       this.dirty = true;
     }
   }
@@ -239,9 +301,10 @@ export class Palette {
       // SCUMM palettes are 6 bit VGA values in most releases but the CD
       // re-releases store full 8 bit. Values above 63 mean 8 bit, so scale
       // only when the whole palette looks like 6 bit data.
-      this.rgba[i * 4] = (this.current[i * 3] * this.intensity[i * 3]) / 255;
-      this.rgba[i * 4 + 1] = (this.current[i * 3 + 1] * this.intensity[i * 3 + 1]) / 255;
-      this.rgba[i * 4 + 2] = (this.current[i * 3 + 2] * this.intensity[i * 3 + 2]) / 255;
+      const from = this.outputRemap ? this.outputRemap[i] : i;
+      this.rgba[i * 4] = (this.current[from * 3] * this.intensity[from * 3]) / 255;
+      this.rgba[i * 4 + 1] = (this.current[from * 3 + 1] * this.intensity[from * 3 + 1]) / 255;
+      this.rgba[i * 4 + 2] = (this.current[from * 3 + 2] * this.intensity[from * 3 + 2]) / 255;
       this.rgba[i * 4 + 3] = 255;
     }
     this.dirty = false;

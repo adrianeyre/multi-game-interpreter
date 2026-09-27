@@ -183,8 +183,13 @@ export function spriteFilename(
   pose: number,
   cel: number,
   gameName: string,
+  facing: PoseFacing = 'all',
 ): string {
-  return `${slug(gameName) || 'game'}-actor-${actor.id}${suffix(actor.name)}-pose-${pose}-cel-${cel + 1}.png`;
+  // The facing is named unless it is the shared drawing, so an imported
+  // character's four views export to four files rather than one overwriting
+  // name — and a hand-drawn sprite's filename is what it always was.
+  const view = facing === 'all' ? '' : `-${facing}`;
+  return `${slug(gameName) || 'game'}-actor-${actor.id}${suffix(actor.name)}-pose-${pose}${view}-cel-${cel + 1}.png`;
 }
 
 export async function exportObjectState(
@@ -204,8 +209,12 @@ export async function exportSpriteCel(
   celIndex: number,
   gamePalette: number[][],
   gameName: string,
+  facing: PoseFacing = 'all',
 ): Promise<void> {
-  const rendered = renderSpriteCel(actor, poseIndex, celIndex, gamePalette);
+  // The facing on screen, not `all`. A costume imported from a published game
+  // has four separate views and no shared drawing, so exporting `all` refused
+  // every imported character with "no cel" while the cel sat on the canvas.
+  const rendered = renderSpriteCel(actor, poseIndex, celIndex, gamePalette, facing);
   if (!rendered) throw new Error('That pose has no cel to export');
-  await writePng(rendered, spriteFilename(actor, poseIndex, celIndex, gameName));
+  await writePng(rendered, spriteFilename(actor, poseIndex, celIndex, gameName, facing));
 }

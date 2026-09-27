@@ -96,6 +96,39 @@ import {
   type SciCursor,
 } from './gfx/SciCursor.js';
 import { SciHeap } from './script/segments.js';
+import { SCI_MENU_BAR_HEIGHT, SciMenuBar } from './gfx/SciMenu.js';
+import { SciPalette16 } from './gfx/sciPalette16.js';
+import {
+  sciDrawCel,
+  sciDrawLine,
+  sciFillRect,
+  sciOnControl,
+  sciRestoreBox,
+  sciSaveBox,
+  type SciRoomSurface,
+  type SciSavedBox,
+} from './gfx/sciPaint16.js';
+import { readSciPortrait, type SciPortrait } from './gfx/SciPortrait.js';
+import { SciScrollWindow, sciLineLength, stripSciTextCodes } from './gfx/SciScrollWindow.js';
+import { sci32CelLink } from './gfx/sciCelLink.js';
+import { applySci32Gamma } from './gfx/sci32Gamma.js';
+import { readSciRave, sciPortraitSchedule } from './gfx/SciPortrait.js';
+import {
+  decodeSciAudio,
+  readSciAudio36Index,
+  SciAudioChannels,
+  type SciAudio36Entry,
+  type SciPcm,
+} from './sound/sciAudioPlayer.js';
+import {
+  findSciDiscRecording,
+  readSciAudioHeader,
+  readSciAudioMap,
+  readSciAudioSample,
+  SCI_BASE_AUDIO_MAP,
+  sciDiscAudioVolume,
+} from './sound/sciAudio.js';
+import { SCI_EVENT } from './SciInput.js';
 import {
   captureSciState,
   restoreSciState,
@@ -262,6 +295,101 @@ export class SciEngine implements AdventureEngine {
    * scenery" flag on every actor.
    */
   private pictureItemCount = 0;
+  /**
+   * The room's control buffer, which the Picture paints and `OnControl` reads.
+   *
+   * Kept beside the Plane rather than on it: the compositor has no use for
+   * where an actor may walk, and ADR 0015 is firm that a Plane carries only
+   * what drawing needs.
+   */
+  private roomControl: Uint8Array | null = null;
+  /** What `Graph(SaveBox)` kept, by the handle it answered. */
+  private readonly savedBoxes = new Map<number, SciSavedBox>();
+  private nextSavedBox = 1;
+
+  /** SCI16's menu bar and status line, and the two Planes they are shown on. */
+  readonly menuBar: SciMenuBar;
+  private statusPlane: Plane | null = null;
+  private menuPlane: Plane | null = null;
+  /** Set while an open pull-down is holding the scripts, with the sound it paused. */
+  private menuHold: { soundWas: boolean; paused: boolean } | null = null;
+
+  /**
+   * The offsets still to present, one a frame, for `ShakeScreen`.
+   *
+   * Sierra's shake is a loop inside the Kernel call: move the screen, update,
+   * sleep three ticks, move it back, update, sleep three ticks. Here each of
+   * those is three presented frames, and the frame is shifted in the
+   * framebuffer itself — so a PNG of a shaking frame shows the shake.
+   */
+  private readonly shakes: Array<{ x: number; y: number }> = [];
+  /** Whether the framebuffer holds a shifted frame the dirty path cannot repair. */
+  private shaken = false;
+
+  /** SCI16's `Palette` state over `palette`: the used flags, intensity and timers. */
+  readonly palette16: SciPalette16;
+  /** SCI32's `SetGamma` level, -1 for none. */
+  gammaLevel = -1;
+  /** Set by `MorphOn`, consumed by the next `FrameOut`. */
+  private morphPending = false;
+  /** How many `FrameOut`s were palette morphs, for a caller checking one happened. */
+  morphFrames = 0;
+
+  /** King's Quest VI's portrait files, read once: null when there is no such file. */
+  private readonly portraits = new Map<string, SciPortrait | null>();
+  private readonly pendingPortraits = new Set<string>();
+  /** The portrait on screen: its face and mouth items, and where it is drawn. */
+  private portraitOnScreen: {
+    name: string;
+    face: ScreenItem;
+    mouth: ScreenItem | null;
+    x: number;
+    y: number;
+    mapping: Uint8Array;
+  } | null = null;
+  /** `rave` lip-sync data by audio id, null for a line that has none. */
+  private readonly raves = new Map<string, Uint8Array | null>();
+
+  /** Digital audio's channels, which `DoAudio` drives and `Portrait` follows. */
+  readonly audio: SciAudioChannels;
+  /** Decoded clips by id, null for one the game does not have. */
+  private readonly audioClips = new Map<string, SciPcm | null>();
+  private readonly pendingAudio = new Set<string>();
+  /** Per-room audio maps, read once. */
+  private readonly audio36Maps = new Map<number, SciAudio36Entry[] | null>();
+
+  /** A room screen `Show` asked to see for one frame. */
+  private shownMap: 'visual' | 'priority' | 'control' | null = null;
+  /** The palette as presented through SCI32's gamma, when a level is set. */
+  private gammaPalette: Palette | null = null;
+  /** A restart the game asked for, done between cycles; and the flag it leaves. */
+  private pendingRestartGame = false;
+  private restartingFlag = 0;
+  /** Where `play` was entered, which a restart enters again. */
+  private bootEntry: {
+    script: number;
+    offset: number;
+    object: Reg;
+    state: SavedGameEnvelope;
+  } | null = null;
+
+  /** SCI32's scroll windows, by the ID `ScrollWindow(Create)` answered. */
+  private readonly scrollWindows = new Map<
+    number,
+    {
+      model: SciScrollWindow;
+      plane: string;
+      rect: { x: number; y: number; width: number; height: number };
+      bitmap: number;
+      fore: number;
+      back: number;
+      font: number;
+      border: number;
+    }
+  >();
+  /** SSCI used a memory handle; ScummVM counts from 10000, and so does this. */
+  private nextScrollWindow = 10000;
+
   /** Views decoded once and kept, keyed by resource number. */
   private readonly views = new Map<number, SciViewResource>();
   /**
@@ -469,6 +597,33 @@ export class SciEngine implements AdventureEngine {
     });
     this.scripts = new SciScripts(this.resources, this.machine, game.version, this.log);
     this.movies = new SciMoviePlayer(this.resources.files, this.input, this.log);
+
+    this.palette16 = new SciPalette16(this.palette);
+    this.audio = new SciAudioChannels({
+      capacity: resources.isSci32 ? 5 : 1,
+      now: () => this.ticks(),
+      output: { start: (pcm, options) => this.sound.startPcm(pcm, options) },
+    });
+    this.menuBar = new SciMenuBar({
+      font: () => this.font(0),
+      white: this.colourCount() >= 256 ? 255 : 15,
+      width: SCREEN_WIDTH,
+    });
+    // The menu bar and status line are SCI16's; SCI32 has neither and builds
+    // its interface from Planes of its own.
+    if (!resources.isSci32) {
+      this.statusPlane = this.compositor.add(
+        new Plane({ x: 0, y: 0, width: SCREEN_WIDTH, height: SCI_MENU_BAR_HEIGHT }, 1),
+      );
+      this.menuPlane = this.compositor.add(
+        new Plane({ x: 0, y: 0, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }, 1000),
+      );
+    }
+  }
+
+  /** 16 for an EGA game, 256 for one with palette resources, and 256 for every SCI32 game. */
+  private colourCount(): number {
+    return this.resources.isSci32 || this.resources.count('palette') > 0 ? 256 : 16;
   }
 
   static async create(source: DataSource, options: SciEngineOptions = {}): Promise<SciEngine> {
@@ -570,6 +725,7 @@ export class SciEngine implements AdventureEngine {
 
     if (this.roomPlane) this.compositor.remove(this.roomPlane);
     this.roomPlane = this.compositor.add(plane);
+    this.roomControl = picture.control;
     this.pictureItemCount = 0;
     this.lastPicture = number;
     this.picValid = true;
@@ -634,6 +790,7 @@ export class SciEngine implements AdventureEngine {
 
     if (this.roomPlane) this.compositor.remove(this.roomPlane);
     this.roomPlane = this.compositor.add(plane);
+    this.roomControl = vectors?.control ?? null;
     this.pictureItemCount = plane.items.length;
     this.lastPicture = number;
     this.picValid = true;
@@ -986,6 +1143,11 @@ export class SciEngine implements AdventureEngine {
           return false;
         }
       },
+      savedGames: () =>
+        // Newest first, the order Sierra's restore dialog lists them in.
+        [...this.gameSaves]
+          .sort(([, a], [, b]) => b.savedAt - a.savedAt)
+          .map(([slot, saved]) => ({ slot, description: saved.name })),
       restoreGame: (slot) => {
         const saved = this.gameSaves.get(slot);
         if (!saved) {
@@ -1034,6 +1196,16 @@ export class SciEngine implements AdventureEngine {
       deleteScreenItem: (id) => this.deleteScreenItem(id),
       frameOut: () => {
         this.framedOut = true;
+        // `kernelFrameOut`: a pending morph *is* this frame. Transitions here
+        // finish the moment they start (`showStyle`), so the morph's frame is
+        // the ordinary frame with the palette already where it is going.
+        if (this.morphPending) {
+          this.morphPending = false;
+          this.morphFrames++;
+        }
+      },
+      morphOn: () => {
+        this.morphPending = true;
       },
       setTextColours: (colours) => {
         this.textColours = [...colours];
@@ -1160,6 +1332,209 @@ export class SciEngine implements AdventureEngine {
         const cel = this.cel(args[0]?.offset ?? 0, args[1]?.offset ?? 0, args[2]?.offset ?? 0);
         return cel ? { width: cel.width, height: cel.height } : null;
       },
+      menuBar: this.menuBar,
+      holdForMenu: (pauseSound) => {
+        this.menuHold = { soundWas: this.sound.isEnabled, paused: pauseSound };
+        if (pauseSound) this.sound.setEnabled(false);
+      },
+      shakeScreen: (times, directions) => {
+        // SCI16 moves the screen ten pixels; SCI32 eight on a hi-res screen,
+        // which this one always is.
+        const by = this.resources.isSci32 ? 8 : 10;
+        const offset = {
+          x: directions & 2 ? by : 0,
+          y: directions & 1 ? by : 0,
+        };
+        for (let shake = 0; shake < times; shake++) {
+          for (let frame = 0; frame < 3; frame++) this.shakes.push(offset);
+          for (let frame = 0; frame < 3; frame++) this.shakes.push({ x: 0, y: 0 });
+        }
+      },
+      colourCount: () => this.colourCount(),
+      palette16: this.palette16,
+      paletteFade: (from, to, percent) => {
+        // `GfxPalette32::setFade`: inclusive, and 256 read as 255 because SQ6
+        // passes it.
+        if (from > to) return;
+        const scale = Math.max(0, Math.min(255, Math.round((percent * 255) / 100)));
+        this.palette.setIntensity(from, Math.min(255, to), scale, scale, scale);
+      },
+      setGamma: (level) => {
+        // Applied where the frame is presented and nowhere else, as
+        // `updateHardware` applies it: the colours the scripts match against
+        // stay as they are.
+        this.gammaLevel = level;
+        if (level >= 0 && !this.gammaPalette) {
+          this.gammaPalette = new Palette();
+          // A fresh palette flushes itself once; after that its colours are
+          // the ones written here and no flush can overwrite them.
+          this.gammaPalette.flush();
+        }
+      },
+      graph16: {
+        drawLine: (from, to, colour, priority, control) => {
+          const surface = this.roomSurface();
+          const origin = this.portOrigin();
+          if (!surface) return;
+          sciDrawLine(
+            surface,
+            { x: from.x + origin.x, y: from.y + origin.y },
+            { x: to.x + origin.x, y: to.y + origin.y },
+            colour,
+            priority,
+            control,
+          );
+        },
+        fillBox: (rect, mask, colour, priority, control) => {
+          const surface = this.roomSurface();
+          if (surface) sciFillRect(surface, this.fromPort(rect), mask, colour, priority, control);
+        },
+        saveBox: (rect, mask) => {
+          const surface = this.roomSurface();
+          const handle = this.nextSavedBox++;
+          if (surface) this.savedBoxes.set(handle, sciSaveBox(surface, this.fromPort(rect), mask));
+          return handle;
+        },
+        restoreBox: (handle) => {
+          const surface = this.roomSurface();
+          const saved = this.savedBoxes.get(handle);
+          if (!surface || !saved) return;
+          sciRestoreBox(surface, saved);
+          this.savedBoxes.delete(handle);
+        },
+        drawCel: (view, loop, cel, left, top, priority) => {
+          const surface = this.roomSurface();
+          const found = this.cel(view, loop, cel);
+          const origin = this.portOrigin();
+          if (surface && found)
+            sciDrawCel(surface, found, left + origin.x, top + origin.y, priority);
+        },
+        onControl: (mask, rect) => {
+          const surface = this.roomSurface();
+          return surface ? sciOnControl(surface, mask, this.fromPort(rect)) : 0;
+        },
+        invertRect: (rect) => this.invertRect(this.fromPort(rect)),
+        portColours: () => {
+          const window = this.windows.get(this.currentPort);
+          return window
+            ? { pen: window.pen, back: window.back }
+            : { pen: 0, back: this.colourCount() >= 256 ? 255 : 15 };
+        },
+      },
+      portraitLoad: (name) => {
+        if (!this.portraits.has(name.toLowerCase())) this.pendingPortraits.add(name);
+      },
+      portraitShow: (request) => {
+        const held = this.portraits.get(request.name.toLowerCase());
+        if (held === null) return false;
+        if (held === undefined) {
+          this.pendingPortraits.add(request.name);
+          return 'loading';
+        }
+        this.showPortrait(request);
+        return true;
+      },
+      portraitSchedule: (request) => {
+        const portrait = this.portraits.get(request.name.toLowerCase());
+        if (!portrait) return null;
+        const id = `${request.resource}:${request.noun}:${request.verb}:${request.cond}:${request.seq}`;
+        if (!this.raves.has(id)) {
+          this.pendingAudio.add(id);
+          return undefined;
+        }
+        const rave = this.raves.get(id);
+        return rave ? sciPortraitSchedule(portrait, readSciRave(rave)) : null;
+      },
+      portraitFrame: (_name, bitmap) => this.portraitFrame(bitmap),
+      showTextEditor: (box) => this.showTextEditor(box),
+      audio: this.audio,
+      audioClip: (id) => {
+        if (this.audioClips.has(id)) return this.audioClips.get(id);
+        this.pendingAudio.add(id);
+        return undefined;
+      },
+      restartGame: () => {
+        this.pendingRestartGame = true;
+        // `abortScriptProcessing = kAbortRestartGame`: nothing more of this
+        // cycle's scripts runs.
+        this.machine.frames.length = 0;
+      },
+      restarting: {
+        flag: () => this.restartingFlag,
+        clear: () => {
+          this.restartingFlag = 0;
+        },
+      },
+      preloadResource: (type, number) => {
+        const name = SCI_RESOURCE_TYPES[type];
+        if (name && this.resources.has(name, number)) void this.resources.read(name, number);
+      },
+      deleteSave: (slot) => {
+        this.gameSaves.delete(slot);
+      },
+      platform: () => (this.game.platform === 'dos' ? 'dos' : 'dos'),
+      showMap: (map) => {
+        this.shownMap = map;
+      },
+      portraitUnload: () => {
+        // `kernelPortraitUnload` is empty in ScummVM: a portrait is not cached
+        // there, and here it is kept for the next line of the same speaker.
+      },
+      celLink: (view, loop, cel, link) => {
+        const bytes = this.resources.peek('view', view);
+        if (!bytes) {
+          if (view < NO_VIEW) this.pendingViews.add(view);
+          return null;
+        }
+        return sci32CelLink(bytes, loop, cel, link);
+      },
+      scrollWindows: {
+        create: (request) => this.createScrollWindow(request),
+        window: (id) => this.scrollWindows.get(id)?.model ?? null,
+        changed: (id) => this.drawScrollWindow(id),
+        show: (id) => {
+          const held = this.scrollWindows.get(id);
+          if (!held || held.model.visible) return;
+          held.model.visible = true;
+          this.drawScrollWindow(id);
+        },
+        hide: (id) => {
+          const held = this.scrollWindows.get(id);
+          if (!held || !held.model.visible) return;
+          held.model.visible = false;
+          this.deleteScreenItem(`scroll:${id}`);
+        },
+        destroy: (id) => {
+          const held = this.scrollWindows.get(id);
+          if (!held) return;
+          this.deleteScreenItem(`scroll:${id}`);
+          this.bitmaps.destroy(held.bitmap);
+          this.scrollWindows.delete(id);
+        },
+      },
+      movePlaneItems: (planeKey, dx, dy, scrollPics) =>
+        this.movePlaneItems(planeKey, dx, dy, scrollPics),
+      messageBox: (message, title, yesNo) => {
+        const host = globalThis as {
+          confirm?: (text: string) => boolean;
+          alert?: (text: string) => void;
+        };
+        if (yesNo && typeof host.confirm === 'function')
+          return host.confirm(`${title}\n\n${message}`);
+        if (!yesNo && typeof host.alert === 'function') {
+          host.alert(`${title}\n\n${message}`);
+          return true;
+        }
+        return undefined;
+      },
+      openUrl: (url) => {
+        const host = globalThis as { open?: (url: string, target: string) => unknown };
+        if (typeof host.open !== 'function') {
+          this.log(`The game asked to open ${url}, and this host has no browser to open it in.`);
+          return false;
+        }
+        return host.open(url, '_blank') !== null;
+      },
       random: () => Math.random(),
       log: (message) => this.log(message),
       playMovie: (request) => {
@@ -1172,6 +1547,594 @@ export class SciEngine implements AdventureEngine {
       closeRobot: () => this.closeRobot(),
     };
     return this.cachedWorld;
+  }
+
+  // ------------------------------------------------ the last surfaces ---
+
+  /**
+   * Feeds an open pull-down what the player has done since the last cycle.
+   *
+   * Every queued event, then one with no type at the pointer's position,
+   * because a mouse session follows the pointer whether or not anything was
+   * pressed. When it ends, the choice waits on the menu bar for the next
+   * `MenuSelect`, and an empty key event is queued so that there is one: a
+   * game's own menu bar calls `MenuSelect` with every event it is handed.
+   */
+  private pumpMenu(): void {
+    const finish = (item: ReturnType<SciMenuBar['feed']>): boolean => {
+      if (!item.done) return false;
+      if (item.item) {
+        this.menuBar.pending = item.item;
+        this.input.post({
+          type: SCI_EVENT.keyDown,
+          message: 0,
+          modifiers: 0,
+          x: this.input.mouseX,
+          y: this.input.mouseY,
+        });
+      }
+      if (this.menuHold?.paused) this.sound.setEnabled(this.menuHold.soundWas);
+      this.menuHold = null;
+      return true;
+    };
+    for (let event = this.input.next(0x7fff); event; event = this.input.next(0x7fff)) {
+      if (finish(this.menuBar.feed(event))) return;
+    }
+    finish(
+      this.menuBar.feed({
+        type: SCI_EVENT.none,
+        message: 0,
+        modifiers: 0,
+        x: this.input.mouseX,
+        y: this.input.mouseY,
+      }),
+    );
+  }
+
+  /** The status line and an open pull-down, onto the two Planes above the room. */
+  private syncMenuPlanes(): void {
+    const status = this.statusPlane;
+    const menu = this.menuPlane;
+    if (!status || !menu) return;
+    // Only once a game has drawn one: a game with no status line keeps
+    // whatever else it put in those rows.
+    if (this.menuBar.statusShown && !status.background) status.background = this.menuBar.status;
+    menu.items.length = 0;
+    const overlay = this.menuBar.overlay;
+    if (!overlay) return;
+    for (const layer of [overlay.bar, overlay.dropdown]) {
+      if (!layer) continue;
+      menu.add({
+        // A clear key no byte can equal: the menu is opaque where it is drawn.
+        cel: {
+          width: layer.width,
+          height: layer.height,
+          displaceX: 0,
+          displaceY: 0,
+          clearKey: 0x100,
+          pixels: layer.pixels,
+        },
+        x: layer.x,
+        y: layer.y,
+        priority: 0,
+        visible: true,
+      });
+    }
+  }
+
+  /** The room's buffers for SCI16's direct drawing, or null before a room is drawn. */
+  private roomSurface(): SciRoomSurface | null {
+    const plane = this.roomPlane;
+    if (!plane) return null;
+    return {
+      width: plane.bounds.width,
+      height: plane.bounds.height,
+      visual: plane.background,
+      priority: plane.mask,
+      control: this.roomControl,
+      addItem: (cel, x, y, priority) => this.addPictureItem(cel, x, y, priority),
+      itemCount: () => this.pictureItemCount,
+      truncateItems: (count) => {
+        if (count >= this.pictureItemCount) return;
+        plane.items.splice(count, this.pictureItemCount - count);
+        this.pictureItemCount = count;
+      },
+    };
+  }
+
+  /** A port-relative rectangle in the room's own coordinates. */
+  private fromPort(rect: { left: number; top: number; right: number; bottom: number }) {
+    const origin = this.portOrigin();
+    return {
+      left: rect.left + origin.x,
+      top: rect.top + origin.y,
+      right: rect.right + origin.x,
+      bottom: rect.bottom + origin.y,
+    };
+  }
+
+  /**
+   * A screen item that belongs to the room's Picture: kept across `Animate`,
+   * which truncates the item list to the Picture's own, and so inserted at
+   * the end of the Picture's items rather than after the cast.
+   */
+  private addPictureItem(
+    cel: Parameters<Plane['add']>[0]['cel'],
+    x: number,
+    y: number,
+    priority: number,
+  ): ScreenItem | null {
+    const plane = this.roomPlane;
+    if (!plane) return null;
+    const item = plane.add({ cel, x, y, priority, visible: true });
+    plane.items.pop();
+    plane.items.splice(this.pictureItemCount, 0, item);
+    this.pictureItemCount++;
+    return item;
+  }
+
+  /**
+   * `kRestartGame16`: back to the boot's object graph, the machine emptied,
+   * and `play` sent to the game object again with the restarting flag up —
+   * `GAMEISRESTARTING_RESTART`, which a game's own `play` reads to skip its
+   * title sequence.
+   */
+  private restartGame(): void {
+    this.pendingRestartGame = false;
+    const boot = this.bootEntry;
+    if (!boot) return;
+    this.machine.frames.length = 0;
+    this.audio.stop();
+    this.input.clear();
+    this.menuBar.close();
+    try {
+      this.loadState(boot.state);
+    } catch (error) {
+      this.log(`The restart could not restore the boot state: ${String(error)}`);
+      return;
+    }
+    this.restartingFlag = 1;
+    this.machine.enter(boot.script, boot.offset, boot.object);
+    this.log('Restarted the game, as it asked.');
+  }
+
+  /**
+   * `invertRect` with the port's pen and back: in the room's own buffer where
+   * it has one, and in the Picture-owned items — controls, windows — that the
+   * rectangle covers, which is where a dialog's buttons are.
+   */
+  private invertRect(rect: { left: number; top: number; right: number; bottom: number }): void {
+    const plane = this.roomPlane;
+    if (!plane) return;
+    const window = this.windows.get(this.currentPort);
+    const pen = window?.pen ?? 0;
+    const back = window?.back ?? (this.colourCount() >= 256 ? 255 : 15);
+    const swap = (
+      buffer: Uint8Array,
+      width: number,
+      x0: number,
+      y0: number,
+      x1: number,
+      y1: number,
+    ) => {
+      for (let y = Math.max(0, y0); y < y1; y++) {
+        for (let x = Math.max(0, x0); x < x1 && x < width; x++) {
+          const at = y * width + x;
+          if (at >= buffer.length) continue;
+          if (buffer[at] === pen) buffer[at] = back;
+          else if (buffer[at] === back) buffer[at] = pen;
+        }
+      }
+    };
+    if (plane.background) {
+      swap(
+        plane.background,
+        plane.bounds.width,
+        rect.left,
+        rect.top,
+        rect.right,
+        Math.min(rect.bottom, plane.bounds.height),
+      );
+    }
+    for (const item of plane.items.slice(0, this.pictureItemCount)) {
+      const { cel } = item;
+      if (item.size) continue;
+      const x0 = rect.left - item.x;
+      const y0 = rect.top - item.y;
+      if (x0 >= cel.width || y0 >= cel.height || rect.right <= item.x || rect.bottom <= item.y)
+        continue;
+      swap(
+        cel.pixels,
+        cel.width,
+        x0,
+        y0,
+        rect.right - item.x,
+        Math.min(cel.height, rect.bottom - item.y),
+      );
+    }
+  }
+
+  /** `debugShowMap`: the priority or control screen, as colours 0 to 15, over the room. */
+  private paintShownMap(map: 'visual' | 'priority' | 'control'): void {
+    const plane = this.roomPlane;
+    if (!plane || map === 'visual') return;
+    const buffer = map === 'priority' ? plane.mask : this.roomControl;
+    if (!buffer) return;
+    const { pixels, width, height } = this.screen;
+    for (let y = 0; y < plane.bounds.height; y++) {
+      const screenY = plane.bounds.y + y;
+      if (screenY < 0 || screenY >= height) continue;
+      for (let x = 0; x < plane.bounds.width && plane.bounds.x + x < width; x++) {
+        pixels[screenY * width + plane.bounds.x + x] = buffer[y * plane.bounds.width + x] & 0x0f;
+      }
+    }
+  }
+
+  /**
+   * One clip into the cache, by `module:number` or `module:n:v:c:s`.
+   *
+   * Module 65535 is the base audio map's numbered samples, or an `audio`
+   * resource in the main map; any other module is a per-room audio map whose
+   * tuple entry says where in `RESOURCE.AUD` the speech is — and where its
+   * `rave` lip-sync data is, which is read at the same time.
+   */
+  private async loadAudio(id: string): Promise<void> {
+    const parts = id.split(':').map(Number);
+    const module = parts[0] ?? 0;
+    const files = this.resources.files;
+    let pcm: SciPcm | null = null;
+    try {
+      if (parts.length === 2) {
+        const number = parts[1] ?? 0;
+        const bytes = this.resources.has('audio', number)
+          ? await this.resources.read('audio', number)
+          : null;
+        const header = bytes ? readSciAudioHeader(bytes) : null;
+        if (bytes && header) {
+          pcm = decodeSciAudio(
+            header,
+            bytes.subarray(header.dataOffset, header.dataOffset + header.length),
+          );
+        } else if (this.resources.layout.multiDiscAudio) {
+          // Each disc's base map addresses its own Volume, and the lowest disc
+          // listing the number is the one ScummVM plays.
+          const found = await findSciDiscRecording(this.resources, number);
+          const sample = found ? await readSciAudioSample(files, found.file, found.offset) : null;
+          if (sample) pcm = decodeSciAudio(sample.header, sample.body);
+        } else {
+          const map = await this.resources.read('map', SCI_BASE_AUDIO_MAP);
+          const entry = map
+            ? readSciAudioMap(map, { sci32: this.resources.isSci32 }).find(
+                (e) => e.number === number,
+              )
+            : undefined;
+          if (entry) {
+            const file = entry.volume === 'sfx' ? 'RESOURCE.SFX' : 'RESOURCE.AUD';
+            const sample = await readSciAudioSample(files, file, entry.offset);
+            if (sample) pcm = decodeSciAudio(sample.header, sample.body);
+          }
+        }
+      } else {
+        const [, noun, verb, cond, seq] = parts;
+        const matches = (e: SciAudio36Entry): boolean =>
+          e.noun === noun && e.verb === verb && e.cond === cond && e.seq === seq;
+        let entry: SciAudio36Entry | undefined;
+        let file = 'RESOURCE.AUD';
+        if (this.resources.layout.multiDiscAudio) {
+          // A room's speech map on disc n addresses `RESAUD.00n`, and the same
+          // room's map on another disc is another table; the lowest disc whose
+          // map holds the line is the one played (`findSciDiscRecording`).
+          for (const disc of this.resources.discs) {
+            const map = await this.resources.readOnDisc('map', module, disc);
+            const volume = sciDiscAudioVolume(this.resources.layout.discAudioFiles, module, disc);
+            entry =
+              map && volume
+                ? readSciAudio36Index(map, this.resources.isSci32).find(matches)
+                : undefined;
+            if (entry && volume) {
+              file = volume;
+              break;
+            }
+          }
+        } else {
+          let index = this.audio36Maps.get(module);
+          if (index === undefined) {
+            const map = await this.resources.read('map', module);
+            index = map ? readSciAudio36Index(map, this.resources.isSci32) : null;
+            this.audio36Maps.set(module, index);
+          }
+          entry = index?.find(matches);
+        }
+        if (entry) {
+          const sample = await readSciAudioSample(files, file, entry.offset);
+          if (sample) pcm = decodeSciAudio(sample.header, sample.body);
+          this.raves.set(
+            id,
+            entry.rave ? await files.read(file, entry.rave.offset, entry.rave.size) : null,
+          );
+        } else {
+          this.raves.set(id, null);
+        }
+      }
+    } catch (error) {
+      this.log(`Audio ${id} could not be read: ${String(error)}`);
+    }
+    if (!pcm)
+      this.log(`Audio ${id} is not in this game, so nothing is heard and its clock does not run.`);
+    this.audioClips.set(id, pcm);
+  }
+
+  /** A mouth frame over the face, or the face alone: `Portrait::drawBitmap`. */
+  private portraitFrame(bitmap: number | null): void {
+    const shown = this.portraitOnScreen;
+    const plane = this.roomPlane;
+    if (!shown || !plane) return;
+    const portrait = this.portraits.get(shown.name.toLowerCase());
+    if (shown.mouth) {
+      const at = plane.items.indexOf(shown.mouth);
+      if (at >= 0 && at < this.pictureItemCount) {
+        plane.items.splice(at, 1);
+        this.pictureItemCount--;
+      }
+      shown.mouth = null;
+    }
+    const frame = bitmap === null ? undefined : portrait?.bitmaps[bitmap];
+    if (!frame || bitmap === 0) return;
+    const pixels = new Uint8Array(frame.pixels.length);
+    for (let i = 0; i < pixels.length; i++) pixels[i] = shown.mapping[frame.pixels[i]];
+    const item = this.addPictureItem(
+      {
+        width: frame.width,
+        height: frame.height,
+        displaceX: 0,
+        displaceY: 0,
+        clearKey: 0x100,
+        pixels,
+      },
+      shown.x + (frame.displaceX >> 1),
+      shown.y + (frame.displaceY >> 1),
+      255,
+    );
+    if (item) {
+      item.size = { width: Math.max(1, frame.width >> 1), height: Math.max(1, frame.height >> 1) };
+      shown.mouth = item;
+    }
+  }
+
+  /**
+   * `InputText`'s box: the title in inverse, the text under it with its
+   * cursor, on a Plane of its own above everything — as
+   * `createTitledFontBitmap` builds it, in the system font.
+   */
+  private showTextEditor(box: Parameters<NonNullable<SciKernelWorld['showTextEditor']>>[0]): void {
+    const planeOf = () => {
+      let plane = this.gamePlanes.get('input-text');
+      if (!plane) {
+        plane = this.compositor.add(
+          new Plane({ x: 0, y: 0, width: this.screen.width, height: this.screen.height }, 0x7fff),
+        );
+        this.gamePlanes.set('input-text', plane);
+      }
+      return plane;
+    };
+    if (!box) {
+      const plane = this.gamePlanes.get('input-text');
+      if (plane) {
+        this.compositor.remove(plane);
+        this.gamePlanes.delete('input-text');
+      }
+      return;
+    }
+    const { script, display } = this.resolution;
+    const width = Math.max(4, this.toScreen(box.rect.width, script.width, display.width));
+    const height = Math.max(4, this.toScreen(box.rect.height, script.height, display.height));
+    const fore = 0;
+    const back = 255;
+    const pixels = new Uint8Array(width * height).fill(back);
+    const font = this.font(999);
+    const half = height >> 1;
+    // The title band, inverse, and the border round the whole box.
+    pixels.fill(fore, 0, half * width);
+    for (let x = 0; x < width; x++) {
+      pixels[x] = fore;
+      pixels[(height - 1) * width + x] = fore;
+    }
+    for (let y = 0; y < height; y++) {
+      pixels[y * width] = fore;
+      pixels[y * width + width - 1] = fore;
+    }
+    if (font) {
+      drawSciText(pixels, width, height, font, box.title, { x: 2, y: 1, colour: back });
+      drawSciText(pixels, width, height, font, box.text, { x: 2, y: half + 1, colour: fore });
+      // The cursor: a bar after the character it sits before.
+      let cursorX = 2;
+      for (const character of box.text.slice(0, box.cursor)) {
+        cursorX += font.glyphs[character.charCodeAt(0)]?.width ?? 0;
+      }
+      for (let y = half + 1; y < height - 1 && y < half + 1 + font.lineHeight; y++) {
+        if (cursorX < width - 1) pixels[y * width + cursorX] = fore;
+      }
+    }
+    const plane = planeOf();
+    plane.items.length = 0;
+    plane.add({
+      cel: { width, height, displaceX: 0, displaceY: 0, clearKey: 0x100, pixels },
+      x: this.toScreen(box.rect.x, script.width, display.width),
+      y: this.toScreen(box.rect.y, script.height, display.height),
+      priority: 0,
+      visible: true,
+    });
+  }
+
+  /** Reads `actors/<name>.bin`, or `<name>.bin`, as `Portrait::init` looks for it. */
+  private async loadPortrait(name: string): Promise<void> {
+    const key = name.toLowerCase();
+    if (this.portraits.has(key)) return;
+    let portrait: SciPortrait | null = null;
+    for (const file of [`actors/${name}.bin`, `${name}.bin`]) {
+      const bytes = await this.resources.files.read(file, 0, 1 << 24);
+      if (bytes.length === 0) continue;
+      portrait = readSciPortrait(bytes);
+      if (!portrait) this.log(`Portrait ${file} does not start "WIN", so it is not one.`);
+      break;
+    }
+    if (!portrait)
+      this.log(`Portrait "${name}" is not in this game's folder, so no face is drawn.`);
+    this.portraits.set(key, portrait);
+  }
+
+  /**
+   * `Portrait::doit`, without the speech: the portrait's palette merged in and
+   * its face drawn at the port-relative position.
+   *
+   * The portraits are hi-res artwork for a 640x400 screen and this one is the
+   * game's own 320x200, so the face is a screen item at half its size —
+   * displacements halved with it. ScummVM then plays the line's audio and
+   * swaps mouth frames over the face as its `rave` resource says; this engine
+   * does not read `rave` resources, so the face stays closed-mouthed, which is
+   * the frame ScummVM also leaves on screen when the line ends.
+   */
+  private showPortrait(request: Parameters<NonNullable<SciKernelWorld['portraitShow']>>[0]): void {
+    const portrait = this.portraits.get(request.name.toLowerCase());
+    const face = portrait?.bitmaps[0];
+    if (!portrait || !face) return;
+    // Drawn once per show: a line that is retried each cycle must not stack
+    // a second face on the first.
+    const origin = this.portOrigin();
+    const x = request.x + origin.x;
+    const y = request.y + origin.y;
+    const shown = this.portraitOnScreen;
+    if (shown && shown.name === request.name && shown.x === x && shown.y === y) {
+      const plane = this.roomPlane;
+      if (plane && plane.items.includes(shown.face)) return;
+    }
+    const mapping = this.palette16.merge(portrait.palette);
+    const pixels = new Uint8Array(face.pixels.length);
+    for (let index = 0; index < pixels.length; index++) pixels[index] = mapping[face.pixels[index]];
+    const item = this.addPictureItem(
+      {
+        width: face.width,
+        height: face.height,
+        displaceX: 0,
+        displaceY: 0,
+        clearKey: 0x100,
+        pixels,
+      },
+      x + (face.displaceX >> 1),
+      y + (face.displaceY >> 1),
+      255,
+    );
+    if (!item) return;
+    item.size = { width: Math.max(1, face.width >> 1), height: Math.max(1, face.height >> 1) };
+    this.portraitOnScreen = { name: request.name, face: item, mouth: null, x, y, mapping };
+  }
+
+  /** `makeScrollWindow`: the model, measured in the window's font, and a bitmap to draw it in. */
+  private createScrollWindow(
+    request: Parameters<NonNullable<SciKernelWorld['scrollWindows']>['create']>[0],
+  ): number {
+    const { script, display } = this.resolution;
+    const width = Math.max(5, this.toScreen(request.rect.width, script.width, display.width));
+    const height = Math.max(5, this.toScreen(request.rect.height, script.height, display.height));
+    const charWidth = (code: number): number => this.font(request.font)?.glyphs[code]?.width ?? 0;
+    const lineHeight = (): number => this.font(request.font)?.lineHeight ?? 8;
+    const model = new SciScrollWindow({
+      width: width - 4,
+      height: height - 4,
+      maxEntries: Math.max(1, request.maxEntries),
+      lineLength: (text, start, lineWidth) => sciLineLength(text, start, lineWidth, charWidth),
+      pageLength: (text, pageWidth, pageHeight) => {
+        // Whole lines that fit in the text rectangle, as `getTextCount` over
+        // the rectangle counts them.
+        const lines = Math.max(1, Math.floor(pageHeight / lineHeight()));
+        let at = 0;
+        for (let line = 0; line < lines && at < text.length; line++) {
+          at += Math.max(1, sciLineLength(text, at, pageWidth, charWidth));
+        }
+        return at;
+      },
+    });
+    // The skip colour is the first index that is neither colour, as ScummVM
+    // picks it, so the window is opaque everywhere it is drawn.
+    let skip = 0;
+    while (skip === request.fore || skip === request.back) skip++;
+    const id = this.nextScrollWindow++;
+    this.scrollWindows.set(id, {
+      model,
+      plane: `${request.plane.segment}:${request.plane.offset}`,
+      rect: { ...request.rect },
+      bitmap: this.bitmaps.create(width, height, skip, request.back),
+      fore: request.fore,
+      back: request.back,
+      font: request.font,
+      border: request.border,
+    });
+    this.drawScrollWindow(id);
+    return id;
+  }
+
+  /** `ScrollWindow::update`'s drawing: the visible lines, and the item if it is shown. */
+  private drawScrollWindow(id: number): void {
+    const held = this.scrollWindows.get(id);
+    const bitmap = held ? this.bitmaps.get(held.bitmap) : null;
+    if (!held || !bitmap) return;
+    this.bitmaps.fill(held.bitmap, 0, 0, bitmap.width, bitmap.height, held.back);
+    if (held.border !== -1) {
+      const { width, height } = bitmap;
+      this.bitmaps.fill(held.bitmap, 0, 0, width, 1, held.border);
+      this.bitmaps.fill(held.bitmap, 0, height - 1, width, height, held.border);
+      this.bitmaps.fill(held.bitmap, 0, 0, 1, height, held.border);
+      this.bitmaps.fill(held.bitmap, width - 1, 0, width, height, held.border);
+    }
+    const font = this.font(held.font);
+    if (font) {
+      held.model.visibleLines().forEach((line, index) => {
+        this.bitmaps.drawText(held.bitmap, font, stripSciTextCodes(line), {
+          x: 2,
+          y: 2 + index * font.lineHeight,
+          colour: held.fore,
+          background: null,
+          maxWidth: 0,
+        });
+      });
+    }
+    if (held.model.visible) {
+      this.addScreenItem(`scroll:${id}`, held.plane, {
+        view: NO_VIEW,
+        loop: 0,
+        cel: 0,
+        x: held.rect.x,
+        y: held.rect.y,
+        priority: held.rect.y,
+        bitmap: held.bitmap,
+      });
+    }
+  }
+
+  /**
+   * `Plane::scrollScreenItems`: every item on the Plane moves by the delta,
+   * its Picture's cels only with `scrollPics`. Answers the script objects
+   * whose items moved, so the Kernel can move their `x` and `y` with them —
+   * an item the engine made itself has no object and is left out, as
+   * ScummVM leaves out an item whose object is a number.
+   */
+  private movePlaneItems(planeKey: string, dx: number, dy: number, scrollPics: boolean): string[] {
+    const plane = this.gamePlanes.get(planeKey);
+    if (!plane) {
+      this.log(`MovePlaneItems named Plane ${planeKey}, which this game has not added.`);
+      return [];
+    }
+    const { script, display } = this.resolution;
+    const x = this.toScreen(dx, script.width, display.width);
+    const y = this.toScreen(dy, script.height, display.height);
+    for (const item of plane.items) {
+      if (item.pictureId !== undefined && !scrollPics) continue;
+      item.x += x;
+      item.y += y;
+    }
+    return [...this.screenItems]
+      .filter(([id, held]) => held.plane === planeKey && /^[1-9]\d*:\d+$/.test(id))
+      .map(([id]) => id);
   }
 
   /**
@@ -1438,6 +2401,18 @@ export class SciEngine implements AdventureEngine {
     // Kept because `Parse` reports a word it did not know *to the game* rather
     // than printing one itself, and the send it makes is to this object.
     this.gameObjectRef = gameObject.id;
+    // What a restart goes back to: the object graph as the boot left it, and
+    // the send that started the game.
+    try {
+      this.bootEntry = {
+        script: method.object.script,
+        offset: method.offset,
+        object: gameObject.id,
+        state: this.saveState('restart'),
+      };
+    } catch (error) {
+      this.log(`The boot state could not be kept, so RestartGame cannot restart: ${String(error)}`);
+    }
     this.machine.enter(method.object.script, method.offset, gameObject.id);
   }
 
@@ -1503,6 +2478,14 @@ export class SciEngine implements AdventureEngine {
       void this.pumpVideo();
       return;
     }
+    // **An open pull-down holds the scripts, because Sierra's did.** Its
+    // `MenuSelect` did not return until the player chose; here it has
+    // returned, and what it would have waited for is fed to it between
+    // cycles instead.
+    if (this.menuBar.open) {
+      this.pumpMenu();
+      return;
+    }
     // The restore the game asked for last cycle, before anything else runs:
     // every frame from the old state is gone by the time this returns.
     if (this.pendingRestore) {
@@ -1523,6 +2506,7 @@ export class SciEngine implements AdventureEngine {
     // first room was reported as lagging. `kFrameOut` is where Sierra's own
     // frame ends, and it is where this one ends now. The budget stays, as the
     // runaway guard it always was.
+    if (this.pendingRestartGame) this.restartGame();
     this.framedOut = false;
     this.machine.run(20000, () => this.framedOut);
     // After the scripts have run rather than before: a cycle that starts a fade
@@ -1711,6 +2695,18 @@ export class SciEngine implements AdventureEngine {
       }
     }
 
+    if (this.pendingPortraits.size > 0) {
+      const names = [...this.pendingPortraits];
+      this.pendingPortraits.clear();
+      for (const name of names) await this.loadPortrait(name);
+    }
+
+    if (this.pendingAudio.size > 0) {
+      const ids = [...this.pendingAudio];
+      this.pendingAudio.clear();
+      for (const id of ids) await this.loadAudio(id);
+    }
+
     if (this.pendingScripts.size === 0) return;
     const wanted = [...this.pendingScripts];
     this.pendingScripts.clear();
@@ -1733,7 +2729,27 @@ export class SciEngine implements AdventureEngine {
    * repaint, which is the only clearing a dirty redraw may do.
    */
   render(): void {
-    this.compositor.compositeDirty(this.screen.pixels, this.screen.width, this.screen.height);
+    this.syncMenuPlanes();
+    const shake = this.shakes.shift();
+    if (shake || this.shaken) {
+      // A shifted frame is not something a dirty repair can mend, and nor is
+      // the first frame after one, so both are drawn whole.
+      const { pixels, width, height } = this.screen;
+      this.compositor.compositeFull(pixels, width, height);
+      this.shaken = false;
+      if (shake && (shake.x !== 0 || shake.y !== 0)) {
+        shiftFrame(pixels, width, height, shake.x, shake.y);
+        this.shaken = true;
+      }
+    } else {
+      this.compositor.compositeDirty(this.screen.pixels, this.screen.width, this.screen.height);
+    }
+    if (this.shownMap) {
+      this.paintShownMap(this.shownMap);
+      this.shownMap = null;
+      // The next frame repaints what the map covered.
+      this.shaken = true;
+    }
     // Over the top, and only while one is playing: a video is played *at* the
     // screen and has no priority, so it is not a screen item and the
     // compositor has no opinion about it. A Robot is the other case and has
@@ -1742,7 +2758,16 @@ export class SciEngine implements AdventureEngine {
   }
 
   present(context: CanvasRenderingContext2D): void {
-    this.screen.present(context, this.palette);
+    this.screen.present(context, this.presentedPalette());
+  }
+
+  /** The palette the frame is shown in: the game's, through its gamma where one is set. */
+  presentedPalette(): Palette {
+    const gamma = this.gammaPalette;
+    if (!gamma || this.gammaLevel < 0) return this.palette;
+    this.palette.flush();
+    applySci32Gamma(this.palette.rgba, gamma.rgba, this.gammaLevel);
+    return gamma;
   }
 
   /**
@@ -2065,6 +3090,8 @@ export class SciEngine implements AdventureEngine {
       top: rect.top,
       contentLeft: rect.left + border,
       contentTop: rect.top + border + titleHeight,
+      pen: colours.pen,
+      back: colours.back,
       item: null,
     };
     this.windows.set(id, window);
@@ -2943,6 +3970,9 @@ interface SciWindow {
   /** Where drawing inside this window is measured from. */
   contentLeft: number;
   contentTop: number;
+  /** The port's colours, which `Graph`'s fills paint in. */
+  pen: number;
+  back: number;
   item: ScreenItem | null;
 }
 
@@ -2971,3 +4001,23 @@ const CONTROL_TEXT = 0;
 const CONTROL_CLEAR = 0xff;
 /** Above the cast, because an interface is drawn over the room and not into it. */
 const CONTROL_PRIORITY = 15;
+
+/**
+ * `setShakePos(x, y)`: the frame moved right and down, with black where it
+ * moved away from.
+ */
+function shiftFrame(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  dx: number,
+  dy: number,
+): void {
+  const source = pixels.slice();
+  pixels.fill(0);
+  for (let y = dy; y < height; y++) {
+    const from = (y - dy) * width;
+    const to = y * width + dx;
+    pixels.set(source.subarray(from, from + width - dx), to);
+  }
+}

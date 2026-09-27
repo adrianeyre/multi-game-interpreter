@@ -1,8 +1,8 @@
 /**
  * BOMP images: run-length encoded, one line at a time.
  *
- * v6 uses this for its AKOS costume cels (codec 5) and for the `BOMP` images a
- * script can stamp into a room. It is a different encoding from the strip
+ * AKOS uses this for its codec 5 cels, and v6 on for the `BOMP` images a
+ * script can stamp over the frame; both are drawn through {@link drawBomp}. It is a different encoding from the strip
  * codecs `BitmapCodec` handles for room backgrounds — those are column-major
  * and bit-packed; this is row-major and byte-oriented.
  *
@@ -23,7 +23,9 @@
  * looping.
  */
 
+import type { Screen } from '../Screen.js';
 import { BIG_COSTUME_SCALE_TABLE } from '../scaleTable.js';
+import { shadePixel, type ShadowRule } from '../ShadowPalette.js';
 
 /**
  * Decodes one BOMP line into `out`, which must be `width` long.
@@ -143,4 +145,110 @@ export function bompScaleMask(size: number, scale: number): boolean[] {
     kept.push((masks[index >> 3] & (0x80 >> (index & 7))) === 0);
   }
   return kept;
+}
+
+/**
+ * The colour a BOMP draw treats as transparent.
+ *
+ * Not zero, which is what the byte-RLE costume codecs use: `drawBomp` decodes
+ * with zeros written and then compares each pixel against 255 on its way to
+ * the screen. Getting this the wrong way round leaves a black rectangle behind
+ * the picture and drops whatever the artwork drew in white.
+ */
+export const BOMP_TRANSPARENT = 255;
+
+/** A decoded BOMP picture: row-major, one byte per pixel, 255 transparent. */
+export interface BompImage {
+  pixels: Uint8Array;
+  width: number;
+  height: number;
+}
+
+export interface BompDrawOptions {
+  /** Screen position of the picture's top-left corner. */
+  x: number;
+  y: number;
+  /** 1..255 per axis, 255 meaning full size. */
+  scaleX?: number;
+  scaleY?: number;
+  /** Drawn right-to-left, for an AKOS cel facing the other way. */
+  mirror?: boolean;
+  /**
+   * How each pixel is shaded against the screen, or absent to paint it.
+   *
+   * Only modes 0, 1 and 3 exist here — `bompApplyShadow` errors on any other,
+   * so a caller is expected to have settled that before drawing.
+   */
+  shadow?: ShadowRule;
+  /**
+   * A colour map applied after scaling and masking (`bompApplyActorPalette`).
+   * Index 255 always maps to itself, so a transparent pixel stays one.
+   */
+  actorPalette?: Uint8Array;
+  /** Whether the room's z-plane hides the screen pixel at (x, y). */
+  isMasked?: (x: number, y: number) => boolean;
+  /** Clipping band in screen rows. */
+  clipTop?: number;
+  clipBottom?: number;
+}
+
+/**
+ * Draws a BOMP picture to the screen (`drawBomp`).
+ *
+ * One routine for every BOMP draw the engine makes — AKOS codec 5 cels, the
+ * run-major codec 16's lines, and blast objects — because the reference has
+ * one, and the order of its steps is part of the result. For each line:
+ *
+ * 1. the line is taken, reversed if mirrored (`bompDecodeLineReverse`);
+ * 2. rows and then columns the scale drops are removed, and the survivors
+ *    close up against the top-left (`setupBompScale`, `bompScaleFuncX`);
+ * 3. pixels a z-plane hides become transparent (`bompApplyMask`);
+ * 4. the actor palette is applied (`bompApplyActorPalette`);
+ * 5. what is left is painted or shaded against the screen
+ *    (`bompApplyShadow`).
+ *
+ * So scaling and shading compose here exactly as they do in the original:
+ * a scaled picture shades pixel for pixel like a full-size one. Whether a
+ * caller *asks* for both is its own business — `drawBlastObject` does not.
+ */
+export function drawBomp(screen: Screen, image: BompImage, options: BompDrawOptions): void {
+  const { pixels, width, height } = image;
+  const {
+    x,
+    y,
+    scaleX = 255,
+    scaleY = 255,
+    mirror = false,
+    shadow,
+    actorPalette,
+    isMasked,
+    clipTop = 0,
+    clipBottom = screen.height,
+  } = options;
+
+  const columns = scaleX === 255 ? null : bompScaleMask(width, scaleX);
+  const rows = scaleY === 255 ? null : bompScaleMask(height, scaleY);
+  const shading = shadow && shadow.mode !== 0 ? shadow : undefined;
+
+  let destRow = 0;
+  for (let row = 0; row < height; row++) {
+    if (rows && !rows[row]) continue;
+    const destY = y + destRow++;
+    if (destY < clipTop || destY >= clipBottom) continue;
+
+    const line = row * width;
+    let destColumn = 0;
+    for (let column = 0; column < width; column++) {
+      if (columns && !columns[column]) continue;
+      const destX = x + destColumn++;
+
+      let colour = pixels[line + (mirror ? width - 1 - column : column)];
+      if (isMasked?.(destX, destY)) colour = BOMP_TRANSPARENT;
+      if (actorPalette && colour !== BOMP_TRANSPARENT) colour = actorPalette[colour];
+      if (colour === BOMP_TRANSPARENT) continue;
+
+      if (shading) colour = shadePixel(shading, colour, screen.getPixel(destX, destY)).colour;
+      screen.putPixel(destX, destY, colour);
+    }
+  }
 }

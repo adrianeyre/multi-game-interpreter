@@ -328,29 +328,32 @@ describe('drawing a queued object', () => {
     });
   });
 
-  it('says once that a shadow mode was drawn without shading', async () => {
-    // Mode 3 recolours the darkest eight indices through a shadow palette
-    // nothing here keeps. Drawing the artwork plainly is the closer of the two
-    // wrong answers, but silence about it is not: the picture would look right
-    // and be unshaded with nothing to say why.
-    const { engine, logs } = await bootV7([STOP], { blastObjectColours: [ARTWORK] });
-    engine.enqueueBlastObject(OBJECT, BLAST_X, BLAST_Y, 0, 0, 255, 255, 1, 3);
+  it('shades mode 3 through the shadow palette its colour picks', async () => {
+    // Mode 3 recolours the darkest eight indices through v7's numbered shadow
+    // tables, looked up by what is already on the screen. Colours from 8 up
+    // paint as they are, which is what keeps the rest of the picture intact.
+    const { engine } = await bootV7([STOP], { blastObjectColours: [2] });
+    engine.shadowPalette.table.fill(OTHER_ARTWORK, 2 * 256, 3 * 256);
     engine.enqueueBlastObject(OBJECT, BLAST_X, BLAST_Y, 0, 0, 255, 255, 1, 3);
     engine.render();
+    expect(blockOf(engine, OTHER_ARTWORK)?.count).toBe(256);
 
-    expect(logs.filter((line) => line.includes('shadow palette'))).toHaveLength(1);
-    expect(blockOf(engine, ARTWORK)?.count).toBe(256);
+    const plain = await bootV7([STOP], { blastObjectColours: [ARTWORK] });
+    plain.engine.shadowPalette.table.fill(OTHER_ARTWORK);
+    plain.engine.enqueueBlastObject(OBJECT, BLAST_X, BLAST_Y, 0, 0, 255, 255, 1, 3);
+    plain.engine.render();
+    expect(blockOf(plain.engine, ARTWORK)?.count).toBe(256);
   });
 
   it('does not report a shadow mode it was never going to apply', async () => {
     // The original throws the mode away when either axis is short of full
-    // scale, so a scaled call asking for mode 3 is not asking for anything
-    // this build is missing, and warning about it would be noise.
+    // scale, so a scaled call asking for a shadow mode — even one this build
+    // does not implement — is not asking for anything, and warning would be noise.
     const { engine, logs } = await bootV7([STOP], { blastObjectColours: [ARTWORK] });
-    engine.enqueueBlastObject(OBJECT, BLAST_X, BLAST_Y, 0, 0, 128, 128, 1, 3);
+    engine.enqueueBlastObject(OBJECT, BLAST_X, BLAST_Y, 0, 0, 128, 128, 1, 2);
     engine.render();
 
-    expect(logs.filter((line) => line.includes('shadow palette'))).toHaveLength(0);
+    expect(logs.filter((line) => line.includes('shadow mode'))).toHaveLength(0);
   });
 
   it('reports an object whose image is not blast artwork, once', async () => {

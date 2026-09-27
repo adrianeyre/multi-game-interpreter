@@ -29,6 +29,7 @@ import { markExported } from './storage.js';
 import { describeTarget } from '../authoring/target.js';
 import type { SciMapVersion } from '../engine/sci/resource/resourceMap.js';
 import type { SciLayout } from '../engine/sci/resource/sciDetect.js';
+import type { SciAudioDisc, SciAudioReplacement } from '../authoring/sci/sciAudioVolume.js';
 
 /** An 8.3 stem shared by the index and data files, as real releases use. */
 export function gameStem(project: Project): string {
@@ -147,6 +148,18 @@ export interface SaveOptions {
     layout: SciLayout;
     /** `RESOURCE.AUD` and its siblings, as this folder holds them. */
     carried: ReadonlyArray<{ name: string; data: Uint8Array }>;
+    /**
+     * Recordings an author replaced, written into the install rather than
+     * only into the project (#227). Absent or empty when none was, which
+     * leaves every carried Volume exactly as it arrived.
+     */
+    audio?: readonly SciAudioReplacement[];
+    /**
+     * A numbered-disc install's discs (`sciPackDiscs`), so it packs back as
+     * the discs it arrived on and a replaced recording is written into its
+     * own disc. Absent for every other install.
+     */
+    discs?: readonly SciAudioDisc[];
   };
 }
 
@@ -180,6 +193,11 @@ async function buildFileSet(
       name: projectFileName(project),
       data: encoder.encode(JSON.stringify(project, null, 2)),
     },
+    // The tracks too large to live inside the JSON, beside it — without them
+    // the "source of truth" reopens elsewhere with every such track listed
+    // and silent. The same folder `exportProjectOnly` writes, so either form
+    // reimports through `importProjectFile`.
+    ...(await externalAudioFiles(project)),
   ];
 
   /*
@@ -246,6 +264,8 @@ async function buildFileSet(
       mapVersion: source.mapVersion,
       layout: source.layout,
       carried: source.carried,
+      audio: source.audio,
+      ...(source.discs ? { discs: source.discs } : {}),
     });
     if (packed.refused.length > 0) {
       return {
@@ -267,6 +287,10 @@ async function buildFileSet(
         ...(packed.carried.length > 0
           ? [`Carried through unrebuilt from ${source.folderName}: ${packed.carried.join(', ')}.`]
           : []),
+        ...(packed.rebuiltVolumes.length > 0
+          ? [`Rebuilt with a replaced recording: ${packed.rebuiltVolumes.join(', ')}.`]
+          : []),
+        ...packed.replacedAudio,
       ],
     };
   }
@@ -384,23 +408,34 @@ export async function exportProjectOnly(project: Project): Promise<void> {
       name: projectFileName(project),
       data: new TextEncoder().encode(`${JSON.stringify(project, null, 2)}\n`),
     },
+    ...(await externalAudioFiles(project)),
   ];
-
-  for (const track of external) {
-    const bytes = await readTrackBytes(track);
-    // A track whose bytes are missing is left out rather than written empty:
-    // an empty file in the archive would reimport as a track that exists and
-    // plays nothing, which is harder to notice than one that is absent.
-    if (bytes) files.push({ name: `${AUDIO_FOLDER}/${track.storeKey}`, data: bytes });
-  }
 
   const safe = project.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'game';
   download(`${safe}.scummproj.zip`, (await createZip(files)) as BlobPart, 'application/zip');
   markExported();
 }
 
-/** Where audio sits inside an exported project archive. */
+/** Where audio sits inside an exported project archive, or a saved folder. */
 export const AUDIO_FOLDER = 'audio';
+
+/**
+ * The audio that lives outside the project JSON, as files to write beside it.
+ *
+ * Shared by Save and by exporting the project alone, because both promise the
+ * same thing — a project that reopens anywhere with every track playable.
+ */
+async function externalAudioFiles(project: Project): Promise<ZipFile[]> {
+  const files: ZipFile[] = [];
+  for (const track of project.audio.filter(isExternal)) {
+    const bytes = await readTrackBytes(track);
+    // A track whose bytes are missing is left out rather than written empty:
+    // an empty file in the archive would reimport as a track that exists and
+    // plays nothing, which is harder to notice than one that is absent.
+    if (bytes) files.push({ name: `${AUDIO_FOLDER}/${track.storeKey}`, data: bytes });
+  }
+  return files;
+}
 
 /** Just the playable container, for handing to someone else. */
 /**
@@ -790,6 +825,8 @@ export async function exportGameOnly(
       mapVersion: source.mapVersion,
       layout: source.layout,
       carried: source.carried,
+      audio: source.audio,
+      ...(source.discs ? { discs: source.discs } : {}),
     });
     if (packed.refused.length > 0) {
       return {
@@ -818,6 +855,10 @@ export async function exportGameOnly(
         ...(packed.carried.length > 0
           ? [`Carried through unrebuilt from ${source.folderName}: ${packed.carried.join(', ')}.`]
           : []),
+        ...(packed.rebuiltVolumes.length > 0
+          ? [`Rebuilt with a replaced recording: ${packed.rebuiltVolumes.join(', ')}.`]
+          : []),
+        ...packed.replacedAudio,
         ...(built.rebuilt.length > 0
           ? [`Scripts rebuilt by the linker: ${built.rebuilt.join(', ')}.`]
           : ['Nothing was edited, so every resource was carried through as it arrived.']),

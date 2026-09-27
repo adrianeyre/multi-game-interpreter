@@ -31,7 +31,7 @@ import {
   sci0ScriptBias,
   type SciBlock,
 } from '../../engine/sci/script/scriptResource.js';
-import { emitSciMethod } from './exportSciGame.js';
+import { emitSciMethod, sciBodiesOf } from './exportSciGame.js';
 import {
   SCI11_EXPORT_COUNT_AT,
   SCI11_EXPORT_TABLE_AT,
@@ -155,16 +155,14 @@ export function linkSciScript(script: SciProjectScript, version?: SciVersion): S
 
   // ---- 1. What each method becomes, and where.
   const rewritten: Rewritten[] = [];
-  for (const object of script.objects) {
-    for (const method of object.methods) {
-      if (method.unrecovered || method.instructions.length === 0) continue;
-      const emitted = emitSciMethod(method, version);
-      rewritten.push({
-        from: method.offset,
-        to: method.offset + originalSpan(method, version),
-        bytes: emitted,
-      });
-    }
+  for (const method of sciBodiesOf(script)) {
+    if (method.unrecovered || method.instructions.length === 0) continue;
+    const emitted = emitSciMethod(method, version);
+    rewritten.push({
+      from: method.offset,
+      to: method.offset + originalSpan(method, version),
+      bytes: emitted,
+    });
   }
   rewritten.sort((a, b) => a.from - b.from);
 
@@ -439,16 +437,14 @@ export function linkSci11Script(script: SciProjectScript, version?: SciVersion):
 
   // ---- 1. What each method becomes, and how much longer or shorter.
   const rewritten: Rewritten[] = [];
-  for (const object of script.objects) {
-    for (const method of object.methods) {
-      if (method.unrecovered || method.instructions.length === 0) continue;
-      const emitted = emitSciMethod(method, version);
-      rewritten.push({
-        from: method.offset,
-        to: method.offset + originalSpan(method, version),
-        bytes: emitted,
-      });
-    }
+  for (const method of sciBodiesOf(script)) {
+    if (method.unrecovered || method.instructions.length === 0) continue;
+    const emitted = emitSciMethod(method, version);
+    rewritten.push({
+      from: method.offset,
+      to: method.offset + originalSpan(method, version),
+      bytes: emitted,
+    });
   }
   rewritten.sort((a, b) => a.from - b.from);
 

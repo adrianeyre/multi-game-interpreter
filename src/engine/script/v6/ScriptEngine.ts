@@ -398,12 +398,9 @@ export class ScriptEngineV6 extends StackScriptEngine implements ScriptEngineInt
         break;
       case KERNEL_SET.ImuseCommand:
         // An iMUSE command routed through the kernel rather than through
-        // `soundKludge`, and this form expects an answer back. Nothing here can
-        // answer a query — the music is rendered up front rather than
-        // sequenced — so it reports success: a script told its command failed
-        // reissues it, and would do so every frame.
-        this.engine.sound.kludge(args.slice(1));
-        this.engine.variables[VAR.SOUNDRESULT] = 0;
+        // `soundKludge`, and this form expects an answer back: the live
+        // sequencer's, as `doCommand` returns it.
+        this.engine.variables[VAR.SOUNDRESULT] = this.engine.sound.kludge(args.slice(1));
         break;
       case KERNEL_SET.StartManiac:
         // DOTT ships Maniac Mansion inside itself and this launches it. That

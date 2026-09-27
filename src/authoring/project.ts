@@ -681,6 +681,47 @@ export interface SciProjectScript {
   heapBytes?: string;
   /** Why this script could not be held as a graph, when it could not. */
   unrecovered?: string;
+  /**
+   * Exported procedures: bodies an export names that no object's dictionary
+   * does. Held like methods so an edit to one — a module number `+ Room`
+   * retargets, say — is written back by the same emitter and linkers. Only
+   * bodies that disassembled to their end are held; the others are listed in
+   * `unreadProcedures` so nothing claims to have looked inside them.
+   */
+  procedures?: SciProjectMethod[];
+  /** Offsets of exported procedures that did not disassemble cleanly. */
+  unreadProcedures?: number[];
+  /**
+   * Instances this editor appended to the block chain, oldest first.
+   *
+   * `at` is where the object starts — a block header in a block-chain script,
+   * the record in the heap for a heap pair — and `relocations` how many
+   * relocation entries were added with it. `length` and `name` are the bytes
+   * of object and of name string inserted, where the layout needs them to
+   * undo the insertion. Recorded because Delete removes only what this editor
+   * added (`sciObjects.ts`): nothing in a script says which of its own objects
+   * another script or an export names. Absent on every imported script.
+   */
+  addedObjects?: Array<{
+    at: number;
+    relocations: number;
+    resource?: 'heap' | 'sci3';
+    length?: number;
+    name?: number;
+  }>;
+  /**
+   * Set on a Script resource this editor added as a new room (`sciRoomAdd.ts`),
+   * with the Picture it copied for it, if any — so Delete can remove what it
+   * added and nothing the game shipped.
+   */
+  addedRoom?: {
+    from: number;
+    picture?: number;
+    /** The word resources (`message`, `text`) copied to this number with it. */
+    words?: string[];
+    /** How many module arguments in the copy were pointed at this number. */
+    retargeted?: number;
+  };
 }
 
 /** One object or class in the graph. */

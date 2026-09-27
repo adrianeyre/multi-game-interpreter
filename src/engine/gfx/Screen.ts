@@ -80,8 +80,14 @@ export class Screen {
    * than the band has nowhere to scroll, which is every v5 and v6 room on the
    * y axis, so those draw from row 0 without anything asking which version is
    * running (ADR 0007).
+   *
+   * `colours`, when given, recolours the background on its way to the screen:
+   * v2-v4's room colour map, which the original applies inside its old strip
+   * decoders. Applying it here instead gives the same pixels — every one of
+   * the background's came out of those decoders — without redecoding the room
+   * each time a script changes a slot.
    */
-  drawRoom(room: RoomGraphics, cameraX: number, cameraY = 0): void {
+  drawRoom(room: RoomGraphics, cameraX: number, cameraY = 0, colours?: Uint8Array): void {
     const { top, height } = this.main;
     const maxX = Math.max(0, room.width - this.width);
     const maxY = Math.max(0, room.height - height);
@@ -98,6 +104,10 @@ export class Screen {
       const srcBase = roomRow * room.width + originX;
       const copyWidth = Math.min(this.width, room.width - originX);
       this.pixels.set(room.background.subarray(srcBase, srcBase + copyWidth), destBase);
+      if (colours) {
+        for (let i = destBase; i < destBase + copyWidth; i++)
+          this.pixels[i] = colours[this.pixels[i]];
+      }
       if (copyWidth < this.width) {
         this.pixels.fill(0, destBase + copyWidth, destBase + this.width);
       }

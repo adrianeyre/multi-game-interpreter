@@ -109,8 +109,9 @@ describe('what volume it ends up at', () => {
 describe('the simplifications a live sequencer removes', () => {
   it('caps a render at two minutes, which is not how long the music is', () => {
     // Rendering ahead means the render has to end somewhere, and game music
-    // loops forever. #106 removes this; the test is here so that removal is a
-    // decision someone made rather than something that happened.
+    // loops forever. A game's own scores are now sequenced live and streamed,
+    // with no cap; the up-front render survives for imported project tracks
+    // and the editor's play button, and this pins its cap.
     expect(MAX_MUSIC_SECONDS).toBe(120);
   });
 
@@ -134,15 +135,16 @@ describe('the split between what is served and what is named', () => {
   });
 
   it('names a player command it cannot serve, once, rather than dropping it', () => {
-    // The scope-1 commands are the dynamic-music feature proper. #106 moves
-    // some of these from "named" to "acted on", and each such move should show
-    // up here as a test that has to be updated deliberately.
+    // The scope-1 commands are the dynamic-music feature proper, and the live
+    // sequencer now serves every one the original has — so what is left to be
+    // named is a command number the original does not know either.
     const sound = new SoundEngine();
     const logs: string[] = [];
     sound.onLog = (line) => logs.push(line);
 
-    sound.kludge([0x0100 | 14, 0, 1]);
-    sound.kludge([0x0100 | 14, 0, 1]);
+    // Command 30 does not exist in the original's player scope either.
+    sound.kludge([0x0100 | 30, 0, 1]);
+    sound.kludge([0x0100 | 30, 0, 1]);
 
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatch(/not implemented/);

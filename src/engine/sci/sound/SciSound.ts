@@ -14,6 +14,7 @@
  */
 
 import type { EngineSound } from '../../AdventureEngine.js';
+import type { SciPcm } from './sciAudioPlayer.js';
 
 export class SciSound implements EngineSound {
   private enabled = true;
@@ -35,6 +36,39 @@ export class SciSound implements EngineSound {
       this.context = new Ctor();
     }
     if (this.context.state === 'suspended') await this.context.resume();
+  }
+
+  /**
+   * Plays decoded digital audio, from `fromTick` sixtieths in, at `volume`
+   * (nought to one). Null when nothing can be heard — no `AudioContext` yet,
+   * which is before the player's first gesture, or sound switched off — and
+   * `DoAudio`'s clock runs the same either way.
+   */
+  startPcm(
+    pcm: SciPcm,
+    options: { volume: number; loop: boolean; fromTick: number },
+  ): { stop(): void } | null {
+    const context = this.context;
+    if (!this.enabled || !context || pcm.samples.length === 0) return null;
+    const buffer = context.createBuffer(1, pcm.samples.length, pcm.rate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < pcm.samples.length; i++) channel[i] = pcm.samples[i] / 32768;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.loop = options.loop;
+    const gain = context.createGain();
+    gain.gain.value = Math.max(0, Math.min(1, options.volume));
+    source.connect(gain).connect(context.destination);
+    source.start(0, Math.max(0, options.fromTick / 60) % Math.max(buffer.duration, 1e-6));
+    return {
+      stop: () => {
+        try {
+          source.stop();
+        } catch {
+          // Already ended, which is the ordinary way a sample stops.
+        }
+      },
+    };
   }
 
   /** For the engine: whether anything would be heard. */

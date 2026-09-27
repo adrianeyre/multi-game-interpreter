@@ -107,9 +107,10 @@ The short version: the factual half is transcribed from the game's Wikipedia
 article and links to it, so a date you doubt has somewhere to be checked; the
 `## How it runs here` half is this project's own honest status for that Engine
 family and Version, and says "out of scope" or "not playable" where those are
-true. `games/fate` is hand-written and is the better thing — where somebody has
-actually played a game, the generated file should be replaced by what they
-learned.
+true. A hand-written README is the better thing — where somebody has actually
+played a game, the generated file should be replaced by what they learned. The
+`games/fate` folder ADR 0031 cites as one is a local game folder beside its
+data, which this repository ignores, so it is not checked in here.
 
 ## AGI games
 

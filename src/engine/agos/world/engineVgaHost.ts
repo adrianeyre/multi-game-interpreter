@@ -383,4 +383,46 @@ export class EngineVgaHost implements VgaHost {
   clearPathfind(): void {
     this.parts.pathfinder?.clear();
   }
+
+  /**
+   * One route's points, by the number `SET_PATHFIND_ITEM` stored it under.
+   *
+   * Read straight from the pathfinder rather than through its selection,
+   * because `vc78_computeXY` indexes the route table by variable 12 itself.
+   * With no pathfinder there are no routes, and that is named.
+   */
+  pathRoute(route: number): readonly (readonly [number, number])[] | null {
+    const pathfinder = this.parts.pathfinder;
+    if (!pathfinder) {
+      this.parts.unsupported?.add('COMPUTEXY/COMPUTEPOSNUM: there is no pathfinder');
+      return null;
+    }
+    return pathfinder.routeFor(route)?.map(({ x, y }) => [x, y] as const) ?? null;
+  }
+
+  /**
+   * No path values, named rather than answered with zero.
+   *
+   * The list is filled by the game bytecode's `off_setPathValues`, which the
+   * interpreter does not implement yet — so there is never anything to read,
+   * and saying so is the honest answer until there is.
+   */
+  nextPathValue(): number | null {
+    this.parts.unsupported?.add('GETPATHVALUE: nothing sets path values (off_setPathValues)');
+    return null;
+  }
+
+  /**
+   * The Feeble Files' looping channel, which this engine's sound has no
+   * equivalent of: `AgosSound` plays one-shot effects and has no channel that
+   * loops until told to stop. Named rather than played once, because a loop
+   * played once is a sound that stops when the scene says it should not.
+   */
+  playSoundLoop(sound: number): void {
+    this.parts.unsupported?.add(`PLAYSOUNDLOOP: no looping sound channel (sound ${sound})`);
+  }
+
+  stopSoundLoop(): void {
+    this.parts.unsupported?.add('STOPSOUNDLOOP: no looping sound channel');
+  }
 }

@@ -38,14 +38,15 @@
 import type { AudioResource } from '../../authoring/audio.js';
 import { SourceVolumeReader } from '../../engine/resource/VolumeReader.js';
 import {
+  findSciDiscRecording,
   looksLikeRiffSample,
   readSciAudioHeader,
   readSciAudioMap,
   SCI_BASE_AUDIO_MAP,
-  type SciAudioSample,
 } from '../../engine/sci/sound/sciAudio.js';
 import type { AudioResourceReader } from '../audioBytes.js';
 import { writeWavePcm } from '../../engine/sound/wave.js';
+import { sciSampleLength } from '../../authoring/sci/sciAudioVolume.js';
 import type { SciGameFolder } from './resupply.js';
 
 /** The bulk files a row can name, in the order a folder is asked for them. */
@@ -62,7 +63,7 @@ export function sciAudioReader(folder: SciGameFolder): AudioResourceReader {
     const table = new Map<number, number>();
     const resource = await folder.resources.read('map', SCI_BASE_AUDIO_MAP);
     if (resource) {
-      for (const entry of readSciAudioMap(resource)) {
+      for (const entry of readSciAudioMap(resource, { sci32: folder.resources.isSci32 })) {
         if (entry.number !== undefined) table.set(entry.number, entry.offset);
       }
     }
@@ -95,7 +96,7 @@ export function sciAudioReader(folder: SciGameFolder): AudioResourceReader {
 
     // The whole sample, header included, so the decode below sees the same
     // shape whichever container it came out of.
-    const sample = await volumes.read(file, offset, sampleLength(header, head));
+    const sample = await volumes.read(file, offset, sciSampleLength(header, head));
     return waveFrom(sample);
   };
 
@@ -107,16 +108,20 @@ export function sciAudioReader(folder: SciGameFolder): AudioResourceReader {
       return bytes ? waveFrom(bytes) : null;
     }
 
+    // A numbered-disc install: each disc's base map addresses its own Volume,
+    // so the offset is only meaningful beside the disc it came from.
+    if (folder.resources.layout.multiDiscAudio) {
+      const found = await findSciDiscRecording(folder.resources, resource.number);
+      if (!found) return null;
+      const head = await volumes.read(found.file, found.offset, 64);
+      const header = readSciAudioHeader(head);
+      if (!header) return null;
+      return waveFrom(await volumes.read(found.file, found.offset, sciSampleLength(header, head)));
+    }
+
     const file = containerFor(resource.file);
     return file ? fromContainer(file, resource.number) : null;
   };
-}
-
-/** How many bytes this sample occupies, header and all. */
-function sampleLength(header: SciAudioSample, head: Uint8Array): number {
-  // A RIFF's own size field measures everything after the first eight bytes;
-  // a SOL's measures the audio alone, and its header sits in front of it.
-  return looksLikeRiffSample(head) ? header.length + 8 : header.dataOffset + header.length;
 }
 
 /**

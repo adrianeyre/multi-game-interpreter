@@ -9,6 +9,10 @@ migration or version selection, and eventually both.
 the field works as designed: a third SCUMM version cost one union member and one
 entry in `SCUMM_TARGETS`. A second Engine family is not that.
 
+(The two have since been renamed `ScummVersionTarget` and
+`SCUMM_VERSION_TARGETS` in `src/authoring/target.ts`, and cover v2 to v8; the
+names above are the ones this decision was taken against.)
+
 A second Engine family breaks the second field the same way. AGI has versions of
 its own — v1, v2 and v3 — and they are not points on SCUMM's scale. `{engine:
 'agi', version: 6}` is not a thing that exists, and neither is a version without

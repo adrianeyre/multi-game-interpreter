@@ -335,20 +335,20 @@ describe('the v7 kernel functions that reach it', () => {
     // v6's order takes the slot for a red scale and shifts everything after it.
     const { engine, run } = await bootV7({ script2: kernelSet(108, 3, 10, 20, 30, 40, 50) });
     const calls: number[][] = [];
-    engine.setShadowPalette = (...args: number[]) => void calls.push(args);
+    engine.setShadowPaletteSlot = (...args: number[]) => void calls.push(args);
 
     run();
 
-    expect(calls).toEqual([[10, 20, 30, 40, 50]]);
+    expect(calls).toEqual([[3, 10, 20, 30, 40, 50]]);
   });
 
   it('takes the slotless form as the same act against slot zero', async () => {
     const { engine, run } = await bootV7({ script2: kernelSet(109, 10, 20, 30, 40, 50) });
     const calls: number[][] = [];
-    engine.setShadowPalette = (...args: number[]) => void calls.push(args);
+    engine.setShadowPaletteSlot = (...args: number[]) => void calls.push(args);
 
     run();
 
-    expect(calls).toEqual([[10, 20, 30, 40, 50]]);
+    expect(calls).toEqual([[0, 10, 20, 30, 40, 50]]);
   });
 });

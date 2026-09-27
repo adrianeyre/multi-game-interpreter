@@ -26,11 +26,13 @@ row, Version by Version" below is that breakdown, and it is what the SCI cells
 should be read against — the cells themselves are King's Quest VII's, because
 that is the only SCI release this branch has bytes for.
 
-**Where the SCI column stands, counted.** 25 Yes, 5 No, 3 that are a Yes for
-part of the family or part of the format and say which, and 1 n/a. The three
-mixed cells are rows 10, 11 and 17, and each says in its own section what half
-it answers and why the other half is not a decision. It was 21 Yes and 11 No
-before this branch.
+**Where the SCI column stands, counted.** 27 Yes, 2 No, 4 that are a Yes for
+part of the family or part of the format and say which, and 1 n/a. The four
+mixed cells are rows 10, 11, 17 and 19, and each says in its own section what
+half it answers and why the other half is not a decision. It was 21 Yes and 11
+No before this branch, 25 Yes and 5 No before rows 12 and 27 moved, 26 Yes and
+3 No before row 19 moved, and 26 Yes with 5 mixed before numbered-disc audio
+moved row 27 to a Yes (27s).
 
 ## Measured against the SCUMM editor, which is what was asked for
 
@@ -41,16 +43,14 @@ which is a comparison between two columns.
 
 Row by row, against the SCUMM column:
 
-**SCI matches or exceeds SCUMM on 28 of the 34 rows.** It is behind on six:
+**SCI matches or exceeds SCUMM on 30 of the 34 rows.** It is behind on four:
 
 | #   | Capability                                           | SCUMM | SCI    |
 | --- | ---------------------------------------------------- | ----- | ------ |
 | 10  | Paint pixels straight into the room canvas           | Yes   | partly |
 | 11  | Edit walk areas on the canvas                        | Yes   | partly |
-| 12  | Add or delete a room, an actor or an object          | Yes   | No     |
 | 17  | Import a PNG over the open frame                     | Yes   | partly |
-| 19  | Edit the screen's background art where the screen is | Yes   | No     |
-| 27  | Replace a recording and have the export carry it     | Yes   | No     |
+| 19  | Edit the screen's background art where the screen is | Yes   | partly |
 
 The rows that are **No for SCI and also No for SCUMM** are not gaps in parity
 and had been reported as though they were. Row 9 is a grid overlay, which SCUMM
@@ -59,49 +59,52 @@ SCUMM project carries as `zPlanes` with no surface that edits them. Counting
 those two as outstanding measured the editor against an ideal rather than
 against the thing it was asked to match.
 
-Three of the six are **partly** rather than absent, and each says in its own
-section which half it answers: 10 and 19 are the same underlying absence — a
-Picture is edited as a list of items and not painted into — so closing one
-largely closes the other.
+All four are **partly** rather than absent, and each says in its own section
+which half it answers. 10 and 19 moved together, because they were one
+absence — a Picture edited as a list and never painted into — and what is
+left of both is the same: a vector Picture has no pixels to paint (10s), and a
+V56 stroke is written in place only when it fits. Row 12 left this table when
+
+- Instance and + Room arrived (12s).
 
 ## The table
 
-| #   | Capability                                                                   | SCUMM                                                                                                   | Broken Sword                                                                                                                              | Broken Sword II                                                                                                                                           | Sierra SCI                                                                                                                                                                                                   |
-| --- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Left column is an accordion of sections, each remembering whether it is open | Yes — Rooms, Actors, Objects, Audio                                                                     | **Yes** — 11: Screens, Start positions, Actors, Objects, Scripts, Text (one per language), Palettes, Pictures, Walk grids, Effects, Audio | **Yes** — 10: Screens, Actors, Run lists, Objects, Globals, Text, Palettes, Animations, Walk grids, Audio                                                 | **Yes** — 11: Rooms, Scripts, Vector Pictures, Cel Pictures, Messages, Views, Fonts, Cursors, Vocabulary, Carried through, Audio                                                                             |
-| 2   | Each section counts its records in the header, and lists them                | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | Yes                                                                                                                                                                                                          |
-| 3   | Picking a row opens that record in the centre pane                           | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | Yes                                                                                                                                                                                                          |
-| 4   | Re-open the game's own folder for the session, so large media can play       | n/a — a SCUMM project carries its own resources                                                         | **Yes** — folder bar above the Audio rows (ADR 0034)                                                                                      | **Yes** — same bar, same reason                                                                                                                           | **Yes** — the folder bar above everything else in the column, and it gates Save and Play (ADR 0034)                                                                                                          |
-| 5   | A room or screen drawn from the game's own art and palette                   | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | **Yes** — the Rooms section, above Scripts: 99 of King’s Quest VII’s 108 rooms draw the Picture their room instance names; see 5s                                                                            |
-| 6   | The things on the screen outlined over that art, hit-tested topmost-first    | Yes                                                                                                     | Yes — every compact with a mouse box or a position                                                                                        | Yes — every object in the screen's run list whose own code states its `ObjectMouse`; 268 of the demo's 973                                                | **Yes** — 989 instances outlined over that art and hit-tested topmost-first; 512 of them draw their own cel and the rest a marker; see 5s                                                                    |
-| 7   | Drag one of them to move it, mouse or keyboard                               | Yes                                                                                                     | Yes — writes `o_mouse_x1…y2` and `o_xcoord`/`o_ycoord` together                                                                           | **Yes** — 268 of the demo's 973 objects; the other 705 refused by name on the panel (see 7a)                                                              | **Yes** — 989 of 989, by mouse or by arrow key, writing the instance’s own `x` and `y` property words; still editable as words too (row 25)                                                                  |
-| 8   | A walk-to point that moves with the thing it belongs to                      | Yes                                                                                                     | Yes — `o_xcoord`/`o_ycoord` is the anchor                                                                                                 | **Yes** — drawn and dragged on its own handle for 57 of the demo's 268 movable objects; 28 more refused by name, and it does not follow the box (see 8a)  | **Yes** — 929 of King’s Quest VII’s 989 placed things declare `approachX` and `approachY`; all 929 are writable, and 345 of them are not 0, 0. Drawn on the selected thing and edited as two numbers; see 8s |
-| 9   | A grid overlay over the screen                                               | No — SCUMM has no grid worth drawing                                                                    | **Yes** — the 16×8 mask grid                                                                                                              | No — Sword II has no screen grid                                                                                                                          | No — SCI has no screen grid. The walkable area is a colour in the Picture’s control plane (11s)                                                                                                              |
-| 10  | Paint pixels straight into the room canvas                                   | Yes — Paint, Rectangle, a palette and a colour picker                                                   | **Yes** — a brush on the picture panel, the screen's background included; 7,143 of 7,143 frames take one                                  | **Yes** — same brush, same widget; 10,895 of 10,895 animation frames and 12 of 12 screen layers                                                           | **Fonts and cursors yes, artwork no** — a pixel grid per glyph and per cursor state; see 10s                                                                                                                 |
-| 11  | Edit walk areas on the canvas                                                | Yes — Walk box and Walk-to tools                                                                        | **Yes** — bars and nodes drawn over the screen, moved and deleted; 9 grids on the demo, 9 of 9 re-emit byte-identically                   | **Yes** — same tool, same seam; 4 grids on the demo, 4 of 4 re-emit byte-identically                                                                      | **From SCI2 yes, before it no** — 395 polygons and 3,891 points on King’s Quest VII, drawn on the room canvas and editable point by point; 43 more refused by name; see 11s                                  |
-| 12  | Add or delete a room, an actor or an object                                  | Yes — + Room, + Actor, Object tool, Delete                                                              | Yes — + Object appends a compact to a section, Delete removes the last; never inserts (12a)                                               | Yes — + Object appends a copy at the next resource id, Delete removes one this editor appended; never inserts (12a)                                       | No — nothing here appends or deletes a resource; see 12s                                                                                                                                                     |
-| 13  | Characters listed as a cast, derived from the game rather than typed in      | Yes — the Actors list                                                                                   | **Yes** — compacts whose `o_type` is `MEGA` or `PLAYER`; 5 on the demo                                                                    | **Yes** — objects whose own code calls a mega opcode; 653 on the demo                                                                                     | **Yes** — 147 on King's Quest VII, derived by walking `-super-` to `Actor`; see 13s                                                                                                                          |
-| 14  | A character's own art on the character's pane                                | Yes                                                                                                     | **Yes** — from `o_walk_resource`; 2 of the demo's 5, 5 of 5 on a retail install (see "Two of five")                                       | **Yes** — from the animation ids its script pushes; 163 of the demo's 653 name one this project holds and 142 of those draw, the other 21 refused by name | **Yes** — 117 of King’s Quest VII’s 147 cast draw the View their own `view` property word names, on a pane of their own; the other 30 are refused by name; see 14s                                           |
-| 15  | Pick a frame of a multi-frame sprite                                         | Yes — the sprite strip                                                                                  | Yes — the frame strip                                                                                                                     | Yes — the frame strip                                                                                                                                     | **Yes** — a loop picker and a cel strip on the View pane and on a cast member’s, over 1,527 Views, 9,027 loops and 53,711 cels; 3,885 of those loops hold more than one cel; see 15s                         |
-| 16  | Export the open frame as a PNG                                               | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | **Yes** — a View’s cels one at a time, fonts, cursors, vector Pictures, cel Pictures, **a room as it is drawn**, and **anything selected on that room**                                                      |
-| 17  | Import a PNG over the open frame, quantised to the game's colours            | Yes                                                                                                     | Yes — colour 0 stays transparent and stays reachable on purpose                                                                           | Yes — including an RLE16 frame's own sixteen colours                                                                                                      | **Fonts, cursors and a re-encodable cel yes; V56 and Pictures no** — King’s Quest VII is V56, so 10 fonts and 3 cursors take one and none of its 53,711 cels does; see 17s                                   |
-| 18  | Play an animation back at speed                                              | Yes — "Play the pose at its real speed"                                                                 | **Yes** — 145 of the demo's 438 sprites, at the rate the script implies                                                                   | **Yes** — 185 of the demo's 509 animations; the rest refused by name (see 18a)                                                                            | **Yes** — the picked loop, stepped at the instance’s own `cycleSpeed` where it declares one — 117 of 117 that draw do — and at SCI’s default of one cel a cycle otherwise (15s)                              |
-| 19  | Edit the screen's background art where the screen is, not only in a list     | Yes                                                                                                     | Yes — Import/Export under the drawn screen                                                                                                | Yes — each of the five layer slots                                                                                                                        | No — the room canvas _draws_ the Picture and does not paint into it; a Picture is still edited only as a list of items (10s)                                                                                 |
-| 20  | Edit mask / priority layers                                                  | No — a SCUMM project carries `zPlanes` and no surface edits them                                        | **Yes** — composed through their Grid, per screen, since this branch                                                                      | n/a — Sword II has no mask resource                                                                                                                       | No — a cel Picture item’s own priority is a number field (748 items on King’s Quest VII), and there is no layer to draw on                                                                                   |
-| 21  | Scripts decompiled to instructions, operands editable in place               | Yes — `ActionEditor` and instruction editing                                                            | Yes — per script module, with named parameters                                                                                            | Yes — per object, with named parameters                                                                                                                   | **Yes** — 218 scripts, 2,821 objects, 3,929 methods and 369,174 instructions on King’s Quest VII, operands editable in place, with a Source view beside them                                                 |
-| 22  | A round-trip guarantee stated per record before an edit is allowed           | Yes                                                                                                     | Yes — `roundTrips`, and export refuses a module that does not                                                                             | Yes — same                                                                                                                                                | **Yes** — which bodies may change length is said when the method opens, per script, since this branch; see 22s                                                                                               |
-| 23  | Text editable, in every language the release ships                           | Yes                                                                                                     | Yes — one accordion section per language                                                                                                  | Yes — with each line's speech id kept beside it                                                                                                           | **Yes** — the Messages section, one row per line, with every language the release ships named; King’s Quest VII ships none (23s)                                                                             |
-| 24  | Palettes editable colour by colour                                           | Yes                                                                                                     | Yes — six-bit VGA triples                                                                                                                 | Yes — the screen's own 256 RGBA quads                                                                                                                     | **Yes** — a colour grid per resource, patched in place; 9 palettes and 2,224 colours on King’s Quest VII, all 9 byte-identical unedited                                                                      |
-| 25  | The game's own variable block editable as a table                            | No — a SCUMM script's variable references are edited in the instruction, and there is no variables pane | No — Sword 1 keeps its state in the compacts, which are edited word by word                                                               | **Yes** — Globals, the game's own resource 1                                                                                                              | **Yes** — script 0’s 401 globals, 1,560 locals across 218 scripts, and 96,384 property words on 2,821 objects, every one of them named; see 25s                                                              |
-| 26  | Audio listed, played and saved out                                           | Yes                                                                                                     | Yes — music, effects and speech, read from the re-supplied folder                                                                         | Yes                                                                                                                                                       | Yes — 65 audio maps on King’s Quest VII, read from the re-supplied folder                                                                                                                                    |
-| 27  | Replace a recording and have the export carry it                             | Yes                                                                                                     | **Yes** — all three kinds: speech re-encoded and `COWS.MAD` rebuilt, a tune written, an effect substituted                                | **Effects yes, measured; speech and music written and unverified** — see 27a                                                                              | **No** — a replacement changes the project and what plays here, not the install: SCI audio Volumes are carried through unrebuilt (#227)                                                                      |
-| 28  | Undo and Redo across every edit                                              | Yes                                                                                                     | Yes — the same `EditorState` history                                                                                                      | Yes                                                                                                                                                       | Yes — the same `EditorState` history                                                                                                                                                                         |
-| 29  | Save the project, export the project, export a playable game                 | Yes                                                                                                     | Yes — rebuilds `swordres.rif` and the clusters                                                                                            | Yes — rebuilds each cluster's own tail index                                                                                                              | Yes — `packSciGame` on the Save route and the Export one; King’s Quest VII packs to a SCI2 install that reads back as one                                                                                    |
-| 30  | An unedited export is byte-identical to the game it came from                | Yes                                                                                                     | Yes — 11 of 11 files on the demo (`npm run reexport:sword`), the speech container and all three executables included                      | Yes — 5 of 5                                                                                                                                              | **Yes** — 3,188 of 3,188 resources (`npm run reexport:sci`), with 0 scripts rebuilt by the linker                                                                                                            |
-| 33  | Edit the screen table the interpreter holds, and have the export write it    | n/a — a SCUMM room's size and layers are in the room resource, which row 29 already covers              | **Yes** — read out of `SWORD.EXE` and written back into it; see 33a                                                                       | n/a — Sword II's screens are resources, covered by rows 5 and 19                                                                                          | n/a — SCI ships no interpreter table this project reads. A room is a Script object, which rows 5, 21 and 25 edit                                                                                             |
-| 34  | Edit where a character is placed when a script sends them somewhere          | No — a SCUMM `putActorAt` is an instruction, edited in the script by row 21                             | **Yes** — 52 placements read out of `SWORD.EXE`'s own code and written back; see 33a                                                      | No — Sword II sets a mega's position from its object's own local variables, which row 7 edits on the screen instead                                       | **Yes**, in two places and neither of them is a table; see 34s                                                                                                                                               |
-| 31  | Play the project from the editor                                             | Yes                                                                                                     | Yes — runs the install this project would export                                                                                          | Yes                                                                                                                                                       | Yes — and what it reaches today is the game’s first room, six screens in; see 31s                                                                                                                            |
-| 32  | Every canvas, list and picker reachable from the keyboard                    | Yes                                                                                                     | Yes — `rovingGroup`/`groupItem`, `canvasKeyboard`                                                                                         | Yes                                                                                                                                                       | Yes — buttons, number fields, the accordion’s own disclosure semantics, and the room canvas, which takes Tab, arrow keys and Shift+arrows                                                                    |
+| #   | Capability                                                                   | SCUMM                                                                                                   | Broken Sword                                                                                                                              | Broken Sword II                                                                                                                                           | Sierra SCI                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Left column is an accordion of sections, each remembering whether it is open | Yes — Rooms, Actors, Objects, Audio                                                                     | **Yes** — 11: Screens, Start positions, Actors, Objects, Scripts, Text (one per language), Palettes, Pictures, Walk grids, Effects, Audio | **Yes** — 10: Screens, Actors, Run lists, Objects, Globals, Text, Palettes, Animations, Walk grids, Audio                                                 | **Yes** — 13: Rooms, Cast, Scripts, Vector Pictures, Cel Pictures, Messages, Views, Fonts, Cursors, Palettes, Vocabulary, Carried through, Audio                                                                                                                                                                                                                                                                                                                                                              |
+| 2   | Each section counts its records in the header, and lists them                | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | Yes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 3   | Picking a row opens that record in the centre pane                           | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | Yes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 4   | Re-open the game's own folder for the session, so large media can play       | n/a — a SCUMM project carries its own resources                                                         | **Yes** — folder bar above the Audio rows (ADR 0034)                                                                                      | **Yes** — same bar, same reason                                                                                                                           | **Yes** — the folder bar above everything else in the column, and it gates Save and Play (ADR 0034)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 5   | A room or screen drawn from the game's own art and palette                   | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | **Yes** — the Rooms section, above Scripts: 99 of King’s Quest VII’s 108 rooms draw the Picture their room instance names; see 5s                                                                                                                                                                                                                                                                                                                                                                             |
+| 6   | The things on the screen outlined over that art, hit-tested topmost-first    | Yes                                                                                                     | Yes — every compact with a mouse box or a position                                                                                        | Yes — every object in the screen's run list whose own code states its `ObjectMouse`; 268 of the demo's 973                                                | **Yes** — 989 instances outlined over that art and hit-tested topmost-first; 512 of them draw their own cel and the rest a marker; see 5s                                                                                                                                                                                                                                                                                                                                                                     |
+| 7   | Drag one of them to move it, mouse or keyboard                               | Yes                                                                                                     | Yes — writes `o_mouse_x1…y2` and `o_xcoord`/`o_ycoord` together                                                                           | **Yes** — 268 of the demo's 973 objects; the other 705 refused by name on the panel (see 7a)                                                              | **Yes** — 989 of 989, by mouse or by arrow key, writing the instance’s own `x` and `y` property words; still editable as words too (row 25)                                                                                                                                                                                                                                                                                                                                                                   |
+| 8   | A walk-to point that moves with the thing it belongs to                      | Yes                                                                                                     | Yes — `o_xcoord`/`o_ycoord` is the anchor                                                                                                 | **Yes** — drawn and dragged on its own handle for 57 of the demo's 268 movable objects; 28 more refused by name, and it does not follow the box (see 8a)  | **Yes** — 929 of King’s Quest VII’s 989 placed things declare `approachX` and `approachY`; all 929 are writable, and 345 of them are not 0, 0. Drawn on the selected thing and edited as two numbers; see 8s                                                                                                                                                                                                                                                                                                  |
+| 9   | A grid overlay over the screen                                               | No — SCUMM has no grid worth drawing                                                                    | **Yes** — the 16×8 mask grid                                                                                                              | No — Sword II has no screen grid                                                                                                                          | No — SCI has no screen grid. The walkable area is a colour in the Picture’s control plane (11s)                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 10  | Paint pixels straight into the room canvas                                   | Yes — Paint, Rectangle, a palette and a colour picker                                                   | **Yes** — a brush on the picture panel, the screen's background included; 7,143 of 7,143 frames take one                                  | **Yes** — same brush, same widget; 10,895 of 10,895 animation frames and 12 of 12 screen layers                                                           | **Yes, except vector Pictures, and V56 bodies where they fit** — fonts and cursors a glyph grid each; View cels and cel Picture items a zoomable brush canvas, written by `writeSciView` before V56 and patched in place from V56 on, a stroke that would outgrow the bytes it replaces taken back and refused by name with both sizes; a vector Picture holds no pixels and is edited as its list of operations; see 10s                                                                                     |
+| 11  | Edit walk areas on the canvas                                                | Yes — Walk box and Walk-to tools                                                                        | **Yes** — bars and nodes drawn over the screen, moved and deleted; 9 grids on the demo, 9 of 9 re-emit byte-identically                   | **Yes** — same tool, same seam; 4 grids on the demo, 4 of 4 re-emit byte-identically                                                                      | **From SCI2 yes, before it no** — 395 polygons and 3,891 points on King’s Quest VII, drawn on the room canvas and editable point by point; 43 more refused by name; see 11s                                                                                                                                                                                                                                                                                                                                   |
+| 12  | Add or delete a room, an actor or an object                                  | Yes — + Room, + Actor, Object tool, Delete                                                              | Yes — + Object appends a compact to a section, Delete removes the last; never inserts (12a)                                               | Yes — + Object appends a copy at the next resource id, Delete removes one this editor appended; never inserts (12a)                                       | **Yes** — + Instance appends a copy of an instance after a script's last object (SCI0/1 block chains, SCI1.1–2.1 heap scripts, SCI3); + Room copies a room's script, and on request its Picture, with its Messages or Text and per-room audio map retargeted; Delete removes only what this editor added; see 12s                                                                                                                                                                                             |
+| 13  | Characters listed as a cast, derived from the game rather than typed in      | Yes — the Actors list                                                                                   | **Yes** — compacts whose `o_type` is `MEGA` or `PLAYER`; 5 on the demo                                                                    | **Yes** — objects whose own code calls a mega opcode; 653 on the demo                                                                                     | **Yes** — 147 on King's Quest VII, derived by walking `-super-` to `Actor`; see 13s                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 14  | A character's own art on the character's pane                                | Yes                                                                                                     | **Yes** — from `o_walk_resource`; 2 of the demo's 5, 5 of 5 on a retail install (see "Two of five")                                       | **Yes** — from the animation ids its script pushes; 163 of the demo's 653 name one this project holds and 142 of those draw, the other 21 refused by name | **Yes** — 117 of King’s Quest VII’s 147 cast draw the View their own `view` property word names, on a pane of their own; the other 30 are refused by name; see 14s                                                                                                                                                                                                                                                                                                                                            |
+| 15  | Pick a frame of a multi-frame sprite                                         | Yes — the sprite strip                                                                                  | Yes — the frame strip                                                                                                                     | Yes — the frame strip                                                                                                                                     | **Yes** — a loop picker and a cel strip on the View pane and on a cast member’s, over 1,527 Views, 9,027 loops and 53,711 cels; 3,885 of those loops hold more than one cel; see 15s                                                                                                                                                                                                                                                                                                                          |
+| 16  | Export the open frame as a PNG                                               | Yes                                                                                                     | Yes                                                                                                                                       | Yes                                                                                                                                                       | **Yes** — a View’s cels one at a time, fonts, cursors, vector Pictures, cel Pictures, **a room as it is drawn**, and **anything selected on that room**                                                                                                                                                                                                                                                                                                                                                       |
+| 17  | Import a PNG over the open frame, quantised to the game's colours            | Yes                                                                                                     | Yes — colour 0 stays transparent and stays reachable on purpose                                                                           | Yes — including an RLE16 frame's own sixteen colours                                                                                                      | **Fonts, cursors, cels and cel Pictures yes; vector Pictures no** — a V56 cel or a cel Picture item takes an import, quantised to its own palette, when its re-encoded body fits the bytes the old one held, and is refused by name, with both sizes, when it does not; a vector Picture has no pixels; not yet counted over King’s Quest VII’s 53,711 cels; see 17s                                                                                                                                          |
+| 18  | Play an animation back at speed                                              | Yes — "Play the pose at its real speed"                                                                 | **Yes** — 145 of the demo's 438 sprites, at the rate the script implies                                                                   | **Yes** — 185 of the demo's 509 animations; the rest refused by name (see 18a)                                                                            | **Yes** — the picked loop, stepped at the instance’s own `cycleSpeed` where it declares one — 117 of 117 that draw do — and at SCI’s default of one cel a cycle otherwise (15s)                                                                                                                                                                                                                                                                                                                               |
+| 19  | Edit the screen's background art where the screen is, not only in a list     | Yes                                                                                                     | Yes — Import/Export under the drawn screen                                                                                                | Yes — each of the five layer slots                                                                                                                        | **Cel Pictures yes, vector Pictures no** — a cel Picture’s items are painted on the same zoomable canvas as a View cel and patched in place when the stroke fits (King’s Quest VII’s 168 are all cel Pictures, not counted stroke by stroke); a SCI0/SCI1 vector Picture is a list of drawing operations and is edited as that list (10s)                                                                                                                                                                     |
+| 20  | Edit mask / priority layers                                                  | No — a SCUMM project carries `zPlanes` and no surface edits them                                        | **Yes** — composed through their Grid, per screen, since this branch                                                                      | n/a — Sword II has no mask resource                                                                                                                       | No — a cel Picture item’s own priority is a number field (748 items on King’s Quest VII), and there is no layer to draw on                                                                                                                                                                                                                                                                                                                                                                                    |
+| 21  | Scripts decompiled to instructions, operands editable in place               | Yes — `ActionEditor` and instruction editing                                                            | Yes — per script module, with named parameters                                                                                            | Yes — per object, with named parameters                                                                                                                   | **Yes** — 218 scripts, 2,821 objects, 3,929 methods and 369,174 instructions on King’s Quest VII, operands editable in place, with a Source view beside them                                                                                                                                                                                                                                                                                                                                                  |
+| 22  | A round-trip guarantee stated per record before an edit is allowed           | Yes                                                                                                     | Yes — `roundTrips`, and export refuses a module that does not                                                                             | Yes — same                                                                                                                                                | **Yes** — which bodies may change length is said when the method opens, per script, since this branch; see 22s                                                                                                                                                                                                                                                                                                                                                                                                |
+| 23  | Text editable, in every language the release ships                           | Yes                                                                                                     | Yes — one accordion section per language                                                                                                  | Yes — with each line's speech id kept beside it                                                                                                           | **Yes** — the Messages section, one row per line, with every language the release ships named; King’s Quest VII ships none (23s)                                                                                                                                                                                                                                                                                                                                                                              |
+| 24  | Palettes editable colour by colour                                           | Yes                                                                                                     | Yes — six-bit VGA triples                                                                                                                 | Yes — the screen's own 256 RGBA quads                                                                                                                     | **Yes** — a colour grid per resource, patched in place; 9 palettes and 2,224 colours on King’s Quest VII, all 9 byte-identical unedited                                                                                                                                                                                                                                                                                                                                                                       |
+| 25  | The game's own variable block editable as a table                            | No — a SCUMM script's variable references are edited in the instruction, and there is no variables pane | No — Sword 1 keeps its state in the compacts, which are edited word by word                                                               | **Yes** — Globals, the game's own resource 1                                                                                                              | **Yes** — script 0’s 401 globals, 1,560 locals across 218 scripts, and 96,384 property words on 2,821 objects, every one of them named; see 25s                                                                                                                                                                                                                                                                                                                                                               |
+| 26  | Audio listed, played and saved out                                           | Yes                                                                                                     | Yes — music, effects and speech, read from the re-supplied folder                                                                         | Yes                                                                                                                                                       | Yes — 65 audio maps on King’s Quest VII, read from the re-supplied folder                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 27  | Replace a recording and have the export carry it                             | Yes                                                                                                     | **Yes** — all three kinds: speech re-encoded and `COWS.MAD` rebuilt, a tune written, an effect substituted                                | **Effects yes, measured; speech and music written and unverified** — see 27a                                                                              | **Yes, numbered discs included; written and unverified against a real multi-disc release** — an `audio` resource is substituted; a base-map recording rewrites map 65535 in either of its forms and rebuilds or extends `RESOURCE.AUD`/`RESOURCE.SFX`; from SCI2 on the Volume is compacted and every per-room speech map that addresses it rewritten; on numbered discs only the disc the recording plays from has its `RESAUD.00n` and audio maps rebuilt, and the install packs back as its discs; see 27s |
+| 28  | Undo and Redo across every edit                                              | Yes                                                                                                     | Yes — the same `EditorState` history                                                                                                      | Yes                                                                                                                                                       | Yes — the same `EditorState` history                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 29  | Save the project, export the project, export a playable game                 | Yes                                                                                                     | Yes — rebuilds `swordres.rif` and the clusters                                                                                            | Yes — rebuilds each cluster's own tail index                                                                                                              | Yes — `packSciGame` on the Save route and the Export one; King’s Quest VII packs to a SCI2 install that reads back as one                                                                                                                                                                                                                                                                                                                                                                                     |
+| 30  | An unedited export is byte-identical to the game it came from                | Yes                                                                                                     | Yes — 11 of 11 files on the demo (`npm run reexport:sword`), the speech container and all three executables included                      | Yes — 5 of 5                                                                                                                                              | **Yes** — 3,188 of 3,188 resources (`npm run reexport:sci`), with 0 scripts rebuilt by the linker                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 33  | Edit the screen table the interpreter holds, and have the export write it    | n/a — a SCUMM room's size and layers are in the room resource, which row 29 already covers              | **Yes** — read out of `SWORD.EXE` and written back into it; see 33a                                                                       | n/a — Sword II's screens are resources, covered by rows 5 and 19                                                                                          | n/a — SCI ships no interpreter table this project reads. A room is a Script object, which rows 5, 21 and 25 edit                                                                                                                                                                                                                                                                                                                                                                                              |
+| 34  | Edit where a character is placed when a script sends them somewhere          | No — a SCUMM `putActorAt` is an instruction, edited in the script by row 21                             | **Yes** — 52 placements read out of `SWORD.EXE`'s own code and written back; see 33a                                                      | No — Sword II sets a mega's position from its object's own local variables, which row 7 edits on the screen instead                                       | **Yes**, in two places and neither of them is a table; see 34s                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 31  | Play the project from the editor                                             | Yes                                                                                                     | Yes — runs the install this project would export                                                                                          | Yes                                                                                                                                                       | Yes — and what it reaches today is the game’s first room, six screens in; see 31s                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 32  | Every canvas, list and picker reachable from the keyboard                    | Yes                                                                                                     | Yes — `rovingGroup`/`groupItem`, `canvasKeyboard`                                                                                         | Yes                                                                                                                                                       | Yes — buttons, number fields, the accordion’s own disclosure semantics, and the room canvas, which takes Tab, arrow keys and Shift+arrows                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## The rows that need more than a cell
 
@@ -837,54 +840,79 @@ So the honest arithmetic is: one missing widget, from which eight rows were
 said to follow; the widget is written, three of the eight are Yes with counts,
 and the remaining five were leaning on 10s, 11s and 13s the whole time.
 
-### 10s. A font and a cursor are editable pixel by pixel; a View and a Picture are not
+That paragraph describes the rows as they stood when the room canvas landed.
+Since then 8, 14, 15 and 18 have become Yes (8s, 14s, 15s), 11 is Yes from
+SCI2 on (11s), 19 and 20 are still No, and 9 is a permanent No — SCI has no
+screen grid to draw.
 
-The one artwork row that is not a flat No. `SciEditor` builds a
+### 10s. Everything that holds pixels is painted; a vector Picture holds none
+
+The row was "fonts and cursors yes, artwork no", and the note under it said the
+artwork half needed two things: a paint surface, and a writer that could save
+what it painted. Both exist now, and the row that is left is a sentence about a
+format rather than about missing code.
+
+**Fonts and cursors** are still the glyph grid: `SciEditor` builds a
 `div.sci-glyph-grid` of `button.sci-glyph-dot` — one button per pixel, each
-carrying `aria-pressed` — for every glyph of a font and for each of a cursor's
-states, and a click toggles the bit and calls `writeSciFont` or
-`writeSciCursor`. On King's Quest VII that is 10 fonts and 3 cursors, and it is
-a real pixel editor reached from the keyboard by being buttons.
+carrying `aria-pressed` — and a click calls `writeSciFont` or `writeSciCursor`.
+A glyph is one bit deep and small, so a grid of buttons is a reasonable widget
+for it. On King's Quest VII that is 10 fonts and 3 cursors.
 
-It stops there because a glyph is one bit deep and small enough that a grid of
-buttons is a reasonable widget for it. A V56 cel is up to 640×480 of 8-bit
-indices, and a grid of 307,200 buttons is not an editor. That needs a paint
-surface, which is a different widget from the room canvas 5s is about: the room
-canvas draws a Picture and moves things over it, and nothing on it writes a
-pixel.
+**A View cel and a cel Picture's item are painted on a canvas**, not a grid —
+a 640×480 SCI2 background is 307,200 pixels, and 307,200 buttons is not an
+editor. The widget is the one both Broken Swords already paint with
+(`swordPictureView.ts`), which was written to be handed pixels, a palette and a
+callback, and needed three things said to it rather than assumed:
 
-**And a paint surface alone would be an editor that cannot save.** The second
-half of this row is in `SciView.ts` rather than in the interface, and whoever
-takes the row should read it first: `writeSciView` **rebuilds** a pre-V56 View
-from its cels, pixels and all, and **patches a V56 View in place** — writing
-back the four bytes of displacement in each cel record and nothing else.
-`describeSciViewInPlace` says why: re-encoding a run-length cel body changes its
-length and moves every record after it, and a V56 cel record carries scaling
-fields, a compression method and two stream offsets this reader does not model,
-so rebuilding one would have to invent them.
+- **The transparent index is the cel's own clear key** (`transparentIndex`),
+  often 255 and never 0 by default, so Delete and the right button erase to it
+  and the checkerboard shows through it.
+- **The writer may refuse**, so `onPaint` can return a sentence: the stroke is
+  taken back off the canvas and the sentence said, rather than left on screen
+  as though it were kept.
+- **It zooms** (`zoomable`): Zoom in and Zoom out buttons and the plus and minus
+  keys, 1× to 16×, scaled by CSS with `image-rendering: pixelated` so the canvas
+  keeps one pixel per image pixel and the pointer, already measured against the
+  drawn box, lands on the pixel under it. A small cel opens large
+  (`swordDefaultZoom`: the largest zoom still no wider than 640), a background
+  opens at its true size, and the arrow-key cursor scrolls the zoomed picture
+  with it. The keys are `canvasKeyboard.ts`'s — arrows, Shift for eight,
+  Enter or Space to paint, Delete to erase, P to pick up — and focus, zoom,
+  cursor and colour survive the rebuild each committed stroke causes.
 
-So the row splits by Version, and the split is worth having before any widget is
-built:
+Each stroke is written once, when the pointer lifts or the key is pressed, by
+the writer the format has:
 
-- **Pre-V56 Views are already writable pixel by pixel.** `writeSciView` builds
-  their cel bodies from `cel.pixels`, so a paint surface over those games would
-  work end to end today.
-- **V56 Views — SCI1.1 and every SCI32 game, King's Quest VII among them —
-  need a cel encoder.** `packSci11Cel` is now that encoder: the inverse of
-  `unpackSci11Cel`, choosing skip, repeat and literal runs and capping each at
-  the 63 pixels six bits hold. It round-trips 17 shapes in
-  `tests/sci-cel-encode.test.ts` and **319 of King's Quest VII's own cels
-  exactly** — 2,757,286 pixel bytes, every one back as it went in, encoding to
-  32.5% of raw.
+- **Pre-V56 Views** (SCI0, SCI1): `writeSciView` rebuilds the View from its
+  cels, pixels and all, so any stroke is written. An EGA View offers its sixteen
+  colours rather than 256 entries of which 240 repeat.
+- **V56 Views** (SCI1.1 and every SCI32 game): `patchSciV56CelPixels` re-encodes
+  the cel with `packSci11Cel`, a row at a time so SCI32's row table stays true,
+  and writes it over the old body when it needs no more bytes than the old one
+  consumed. A stroke that would outgrow it is refused by name with both sizes —
+  every record after it points at a fixed offset, and moving them is the
+  relayout nobody has written. A mirrored loop has no pixels of its own and is
+  offered no brush, with a sentence naming the loop to paint instead.
+- **Cel Pictures** (`patchSciCelPicturePixels`): a cel Picture's item is the V56
+  View's cel record byte for byte (`SciCelPicture.ts`), so it goes through the
+  same patch on the same terms, including SCI1.1's container, which carries no
+  method byte. A SCI2 full-screen background is usually stored uncompressed,
+  and an uncompressed body always fits. An item's position and priority are
+  not touched, so moving it (below) and painting it are independent edits.
 
-What the encoder does **not** yet do is put the result back in the resource. A
-V56 record addresses two streams by offset, so a body that re-encodes longer
-than the one it replaces moves every record after it, and the record also
-carries scaling fields and a compression method this reader does not model.
-Patching in place is available whenever the new body fits the old space, and
-that is the next step rather than a new unknown.
+How often a typical stroke fits a run-length V56 body on King's Quest VII has
+not been counted; the uncompressed backgrounds always do.
+`tests/sci-paint.test.ts` is the Tier 1 evidence for the patch and the wiring,
+and `tests/sci-v56-import.test.ts` for the V56 patch it shares with row 17.
 
-What a View **does** offer is its geometry: every cel's origin (`displaceX`,
+**A vector Picture is not painted, and that is the format.** A SCI0 or SCI1
+Picture is a list of drawing operations and nothing else; its screen is what
+they draw. A painted pixel would have to become lines and fills that draw it,
+which is an encoder from a bitmap to operations — and its output would not be
+the Picture the author drew over. So it keeps its list editor, and its panel
+says so where the brush would have been.
+
+What a View also offers is its geometry: every cel's origin (`displaceX`,
 `displaceY`) is a number field, written back into the cel record in place —
 1,527 Views, 9,027 loops and 53,711 cels on King's Quest VII, and the loops
 that are mirrors of other loops say so rather than offering fields that would
@@ -936,8 +964,8 @@ read anyway.
   **control** — and the control buffer's colour index at a pixel is what
   `kCanBeHere` tests. The walkable area is not stored as an area at all; it is
   a property of the pixels, and editing it means painting the control plane,
-  which needs the paint surface 10s is about plus a way to show a plane that
-  was never meant to be looked at. The room canvas draws the _visual_ buffer,
+  which is a vector Picture's operations rather than pixels (10s), plus a way
+  to show a plane that was never meant to be looked at. The room canvas draws the _visual_ buffer,
   and the walkable area is not in it.
 - **From SCI2**, rooms add `Polygon` objects, and a polygon is built by the
   room's own code as it runs. That was read as "cannot be read" and it is the
@@ -1009,18 +1037,49 @@ most of them.
 Row 9 stays a No, for a smaller reason that has not changed: there is no grid in
 SCI at all, at any Version.
 
-### 12s. Nothing is appended or deleted, and the arithmetic is not the Swords'
+### 12s. An instance and a room are added by copying, and only what was added is deleted
 
-`+ Room` has no SCI equivalent on this surface. Unlike 12a, the reason is not
-that an index is a name: a SCI resource is addressed by `(type, number)` in the
-map, and a new Script resource could take an unused number without renumbering
-anything. What stops it is that a Script resource is not a blank that can be
-filled in — a new room needs a `Room` subclass, a method dictionary, a property
-table and an entry in `vocab.996`'s class table, and the linker that would lay
-those out is the one that refuses every SCI1.1 and SCI3 script already (22s).
+This section used to be a No: "a new room needs a `Room` subclass, a method
+dictionary, a property table and an entry in `vocab.996`'s class table, and the
+linker that would lay those out is the one that refuses every SCI1.1 and SCI3
+script already". That is true of a room written from nothing, and it was
+recorded as "a No that follows the linker, not a No about the format". **Since
+then both halves are a Yes, because neither is written from nothing.**
 
-So this is a No that follows the linker, not a No about the format. It is
-recorded that way rather than as "SCI cannot".
+**+ Instance** copies an instance the script already has and appends it after
+the script's last object. The copy shares its method bodies with the original
+and has properties of its own, and it may take a new name, written as a new
+string. Each layout needs its own arithmetic, and each is a file:
+`sciObjects.ts` for a SCI0/SCI1 block chain, where a block appended after the
+last one moves nothing and only the relocation block may grow;
+`sciHeapObjects.ts` for SCI1.1 to SCI2.1, where the heap's strings and
+relocation table move and every word the heap and code tables list is
+rewritten — after checking that every disassembled `lofsa`/`lofss` is in the
+code table, so a heap reference the linker cannot see refuses the script rather
+than being left wrong; and `sciSci3Objects.ts` for SCI3, where the header
+offsets and relocation records move and no code byte changes. A class is never
+copied: `vocab.996` names one script per species.
+
+**+ Room** copies a room the game ships under a new Script number
+(`sciRoomAdd.ts`) — the script and, from SCI1.1, its heap — because `newRoom`
+names a script and export 0 is the room, so nothing in the copy records its own
+number. On request the Picture is copied to a number of its own and the copy's
+`picture` word repointed. The room's Messages (from SCI1.1) or Text (before it)
+are copied to the new number, `Message` and `GetFarText` calls that push the old
+number as their module are retargeted, and the room's per-room audio map comes
+too, so its lines still have their speech. A script that defines a class is
+refused, and so is a room whose code holds its own number anywhere the
+disassembly cannot show is a module argument — guessing either way would write
+a room that reads the wrong words.
+
+**Delete** removes only what this editor added, and for instances only the most
+recent — the rule 12a gives the Swords — because a shipped room may be named by
+any other script's `newRoom` and nothing says which. Counted on King's Quest
+VII's 218 scripts: not yet. The Tier 1 evidence is
+`tests/sci-objects.test.ts`, `tests/sci-heap-objects.test.ts`,
+`tests/sci-sci3-objects.test.ts` and `tests/sci-room-add.test.ts`: the three
+instance files hold a delete to restoring the script's bytes exactly, and the
+room file holds it to removing only what was added, Picture included.
 
 ### 13s. A SCI game has no cast table, so the cast is a question put to the class graph
 
@@ -1112,10 +1171,10 @@ the Views section plays at SCI's default of one cel a cycle and names _that_.
 Neither is invented, and the label always says which of the two is running —
 the same rule the View pane's export note follows about colours.
 
-What this does **not** add is a pixel editor for a cel. 10s still stands: a V56
-cel is up to 640x480 of 8-bit indices and a grid of 307,200 buttons is not an
-editor. Drawing a frame and painting into one are different capabilities, and
-rows 10 and 19 are still No.
+What this did **not** add was a pixel editor for a cel, and that has since
+arrived beside it (10s): the cel the strip is showing is painted on a zoomable
+canvas under the strip, and picking another cel in the strip replaces that
+panel without rebuilding the strip the focus is in.
 
 ### 17s. A PNG comes back in where there is an encoder for it, and nowhere else
 
@@ -1139,22 +1198,39 @@ cels and `writeSciCelPixels` re-encodes the run-length body from the pixels. So
 the import button appears on the cel the frame strip is showing, quantised
 against the same colours the export note names.
 
-**A V56 cel does not, and the reason is not a decision.** `writeSciView`
-patches `displaceX` and `displaceY` in place and **does not re-encode a V56
+**A V56 cel did not, and the reason was not a decision.** `writeSciView`
+patched `displaceX` and `displaceY` in place and **did not re-encode a V56
 body at all** — a cel there is two run-length streams whose length would change,
-and every record after it points at a fixed offset. So the import button is
-behind exactly the sentence `describeSciViewInPlace` already puts on the panel,
-and a V56 View grows none: a button that wrote a cel back unencoded would be
-worse than the No it replaced. Both kinds of Picture are the same case.
+and every record after it points at a fixed offset. So King's Quest VII, a V56
+release, had **none of its 53,711 cels taking an import and all of its 10 fonts
+and 3 cursors doing so**.
 
-King's Quest VII is a V56 release, so **none of its 53,711 cels takes an import
-and all of its 10 fonts and 3 cursors do.** The older half of the family is the
-other way round, which is the second time this page has had to say that the
-block-chain Versions are better off than the SCI32 ones (22s is the first).
+**Since then a V56 cel takes one when it fits** (`sciViewCel.ts`). The import
+is re-encoded with `packSci11Cel`, one row at a time so SCI32's row table stays
+true, and written over the old body when it needs no more bytes than the old
+body consumed — measured by decoding the old cel, since a V56 record stores no
+stream lengths. Every patch is re-read and compared with the pixels asked for.
+It is refused by name, with both sizes, when it does not fit; refused when
+another cel's record names the same streams, because writing it would repaint
+both; and a mirrored loop's cel is offered no button, having no record of its
+own. How many of King's Quest VII's cels a typical import fits has not been
+counted; `tests/sci-v56-import.test.ts` is the Tier 1 evidence. A cel Picture
+now has the writer — its items are painted through the same patch (10s) — and
+an import too: an **Import a PNG** button on the item being painted, a plain
+button in the tab order, decoded and quantised through the same
+`importImage.ts` path the View cel uses — against the Picture's own palette,
+with the renderer's beneath it where the Picture carries none — with the
+source's alpha becoming the item's own clear key. It is written through
+`patchSciCelPicturePixels`, the painting patch, and refused by name with both
+sizes, changing nothing, when the re-encoded body would not fit. An
+uncompressed SCI2 background always fits. `tests/sci-paint.test.ts` covers
+both outcomes through the editor. A vector Picture has no pixels to import
+over.
 
-So the row is: fonts and cursors everywhere, View cels where there is an
-encoder, and no Picture. That is the same shape as row 10, and the same reason
-— this project can write the formats it has encoders for, and says which.
+So the row is: fonts and cursors everywhere, View cels and cel Picture items
+where the re-encoded body fits, and no vector Picture import. Row 10 was the
+same shape for the same reason — this project can write the formats it has
+encoders for, and says which.
 
 ### 22s. Same length only — for SCI3 now, and no longer for the family
 
@@ -1261,7 +1337,76 @@ two bytes of the heap and none of the code.
 A value that does not fit in sixteen bits is refused on the field and the field
 put back, rather than being truncated into a number the author did not type.
 
-### 31s. Play runs, and what it reaches is four screens in
+### 27s. A replaced recording is written into the install, where the map it is in can be read
+
+The cell used to read "a replacement changes the project and what plays here,
+not the install: SCI audio Volumes are carried through unrebuilt (#227)".
+**Since then Export and Play both write it** (`sciAudioVolume.ts`, reached
+through `packSciGame`). A recording is in one of two places and each has its
+write:
+
+- **An `audio` resource in the resource map** has its body substituted, in the
+  container the original used — RIFF where the release ships RIFF, Sierra's SOL
+  where it ships SOL — and is laid out by the packer like any edited Script.
+- **An entry in the base audio map (65535)** addresses `RESOURCE.SFX` when the
+  install has one and `RESOURCE.AUD` otherwise, as ScummVM's `addAudioSources`
+  picks. The map is read in either of the forms ScummVM's `readAudioMapSCI11`
+  reads — six bytes an entry with a 32-bit offset, or five with a cumulative
+  24-bit step — told apart as it tells them: always the cumulative form from
+  SCI2 on, and by counting the trailing `0xff` bytes before.
+
+What happens to the Volume depends on who else points into it:
+
+- **Only map 65535** (always so for `RESOURCE.SFX`): rebuilt whole, sample by
+  sample in map order, and the map rewritten.
+- **Per-room speech maps too, before SCI2**: those maps come in widths this
+  project only infers, so the new sample is appended after the Volume's last
+  byte and only its own entry repointed; nothing any of them addresses moves.
+  A cumulative map that would need a step past 24 bits to reach the end is
+  refused by name.
+- **Per-room speech maps too, from SCI2 on**: ScummVM fixes their width there
+  (the "late" form — a 32-bit base, then per entry the tuple, a 24-bit step and
+  a sync size when the tuple's `0x80` flag is set, seven bytes or nine), so they
+  are read exactly and an append is the wrong tool: pointing one cumulative
+  entry at the end of a Volume hundreds of megabytes long is a step no 24-bit
+  field holds. So the Volume is compacted — every recording any map names,
+  sync data included, copied byte for byte in its original order, the
+  replacement written where its original began — and the base map and every
+  speech map whose recordings moved are rewritten. A map none of whose
+  recordings moved is carried as it was.
+
+**Numbered discs** — `RESMAP.00n` beside `RESSCI.00n` per disc, with
+`RESSCI.001` present and no `RESOURCE.AUD`, which is ScummVM's `_multiDiscAudio`
+rule — are read and written disc by disc. The resource layer reads every
+`RESMAP.00n` that has a `RESSCI.00n` of its own number (a map without one is
+skipped, as ScummVM skips GK2's bogus Steam `RESMAP.001`), adding the map's
+number to each entry's volume; where two discs list one resource the later
+disc's is served, which is `readResourceMapSCI1` updating a Volume entry, and
+every disc's own list is kept. Each disc's audio maps are that disc's: map
+65535 on disc n addresses `RESSFX.00n` (or `RESAUD.00n` where the disc ships
+no `RESSFX.00n`, a fallback in the spirit of ScummVM's RAMA one) and every
+other map `RESAUD.00n`. A recording is played, listed and replaced from the
+lowest disc whose base map lists it, because ScummVM's `addResource` keeps the
+first. Replacing one rebuilds that disc's Volume and that disc's audio maps by
+the rules above and carries every other disc's audio Volume and maps byte for
+byte; the install packs back as its discs, a `RESMAP.00n` and `RESSCI.00n` each
+with the resources that disc listed, a copy a later disc shadows going back as
+it arrived. None of this has been run against a real multi-disc release on
+this branch.
+
+**Refused by name:** a step a cumulative map cannot hold; a speech map whose
+entries cannot be told apart; a replacement that is not a PCM WAVE; a rate
+SOL's field cannot hold; a recording the map does not list — on numbered
+discs, one no disc's base map lists — and a disc with neither `RESSFX.00n` nor
+`RESAUD.00n` to write into. The listing and playback read a SCI32 base map at
+its own width now too — they used to read it at six bytes. An unedited export
+still carries every audio Volume byte for byte.
+Tier 1: `tests/sci-audio-export.test.ts` (SCI1.1),
+`tests/sci32-audio-export.test.ts` (SCI32, read back through the interpreter's
+own `readSciAudio36Index`) and `tests/sci32-multi-disc.test.ts` (a synthetic
+two-disc install).
+
+### 31s. Play runs, and what it reaches is the first room, six screens in
 
 Row 31 is a Yes in the sense the other three columns mean it: the SCI arm of
 `familySurface()` has a `play`, it packs the project through `packSciGame` and
@@ -1270,8 +1415,8 @@ runs the install underneath the open folder, and it is the same button.
 What that install does when it runs is part one of this branch's report and not
 this page's subject, but the row should not be read as more than it says: King's
 Quest VII boots, loads all 218 scripts, reaches **room 15, the Sierra logo**, and
-plays it through to its **main menu** (room 30) on no input. Clicks take it four
-screens further — the **"Name Your Game" on-screen keyboard** (room 20), that
+plays it through to its **main menu** (room 30) on no input — two screens.
+Clicks take it four screens further — the **"Name Your Game" on-screen keyboard** (room 20), that
 room's **chapter selector**, the **chapter-one title card** (room 35) and, past
 its Continue button, **the desert that is the game's first room** (room 1250),
 drawn in its own art with Rosella standing in it. Nothing past that first room

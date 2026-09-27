@@ -81,8 +81,9 @@ jobs:
 
   # The one job in this project that runs against real, shipped game data.
   #
-  # `docs/processes/verifying-version-support.md` says CI can never assert
-  # Completable because game data cannot live in this repository. The data still
+  # `docs/processes/verifying-version-support.md` used to say CI can never assert
+  # Completable because game data cannot live in this repository (#266 withdrew
+  # that for the freeware families). The data still
   # cannot — nothing here is committed or cached — but Revolution released both
   # their adventures as freeware in 2003, so a build machine may lawfully fetch
   # them, and that makes these two the only games this project can check against
@@ -175,7 +176,8 @@ jobs:
       # part of what CI checks here, not a gap in it: `play:vt` exits zero
       # having named the file or the interpreter it needs, and the day one of
       # those refusals turns into a stack trace is the day this line earns its
-      # place. Only one of the four gets past `refused` today.
+      # place. Two of the four get past `refused` today: Lure's floppy reaches
+      # `loaded` and Beneath a Steel Sky's CD reaches `room`.
       - name: Report how far a playthrough reaches
         run: |
           npm run play:vt -- games/lure-of-the-temptress

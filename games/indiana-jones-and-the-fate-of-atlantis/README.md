@@ -75,9 +75,11 @@ Two things to expect from this particular copy:
   compressed re-encodings are not in that layout, so each line falls back to
   being timed by its length: subtitles, and the pacing the floppy release had.
   The original uncompressed speech turns it on.
-- **Music that does not always follow.** Some iMUSE commands are not
-  implemented yet; they are logged by name as they come up rather than passed
-  over, so the log says which cue was missed.
+- **Music that follows the game.** This bullet used to say some iMUSE
+  commands were not implemented. Since then the score is sequenced live — a
+  jump, a loop, a hook or a fade lands while the music plays, on the emulated
+  AdLib — and a command the player does not recognise is still logged by name
+  once rather than passed over. That has not been re-checked against this copy.
 
 ## Elsewhere
 

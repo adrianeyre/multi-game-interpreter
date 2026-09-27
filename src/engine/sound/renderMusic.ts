@@ -1,7 +1,16 @@
-import { AdLibDriver } from './AdLibDriver.js';
-import { MIDI_META, MIDI_NOTE_OFF, MIDI_NOTE_ON, type MidiFile } from './midi.js';
-import { Opl2, OPL2_RATE } from './opl2/Opl2.js';
-import { readScummMusic } from './scummAdl.js';
+import {
+  MIDI_CONTROL_CHANGE,
+  MIDI_META,
+  MIDI_NOTE_OFF,
+  MIDI_NOTE_ON,
+  type MidiEvent,
+  type MidiFile,
+} from './midi.js';
+import { GlobalInstruments, InstrumentRouter } from './imuseInstruments.js';
+import { mt32VelocityToGm } from './mt32.js';
+import { OPL2_RATE } from './opl2/Opl2.js';
+import { readScummScore } from './scummAdl.js';
+import { createSynth, type ScoreKind } from './synth.js';
 
 /**
  * Renders a score to samples, all at once.
@@ -37,7 +46,8 @@ export interface RenderedMusic {
 }
 
 /**
- * Plays a parsed MIDI file through an OPL2 and returns the audio.
+ * Plays a parsed MIDI file through an OPL2 and returns the audio — or, for a
+ * speaker arrangement, through the emulated PC speaker.
  *
  * The loop is a sequencer: advance to the next event's tick, rendering the
  * samples that fall in between, then apply the event. Tempo changes only alter
@@ -58,9 +68,31 @@ export interface RenderedMusic {
  * still has to happen, or the music resumes with the wrong instruments on every
  * channel. Only the waiting is skipped.
  */
-export function renderMidiToOpl2(midi: MidiFile, sampleRate: number, fromTick = 0): RenderedMusic {
-  const chip = new Opl2();
-  const driver = new AdLibDriver(chip);
+export function renderMidiToOpl2(
+  midi: MidiFile,
+  sampleRate: number,
+  fromTick = 0,
+  kind: ScoreKind = 'adlib',
+): RenderedMusic {
+  const synth = createSynth(kind);
+  // The score's own instruments — sysex 16 and 17, programme changes into the
+  // global slots — are read the way iMUSE reads them.
+  const instruments = new InstrumentRouter(synth, kind, new GlobalInstruments());
+  const driver = {
+    handle: (event: MidiEvent) => {
+      // The sequencer's own sysex — hooks, markers, loops — is instructions
+      // to iMUSE rather than to the sound card.
+      if (isSequencerSysex(event)) return;
+      if (instruments.handle(event)) return;
+      synth.handle(kind === 'mt32' ? mt32Velocity(event) : event);
+    },
+  };
+  // Every channel's volume first, as iMUSE's part set-up sends it: the
+  // speaker keeps a channel silent until it has been told one.
+  for (let channel = 0; channel < 16; channel++) {
+    synth.handle({ tick: 0, command: MIDI_CONTROL_CHANGE, channel, data1: 7, data2: 127 });
+  }
+  const chip = synth;
 
   const limit = Math.floor(OPL2_RATE * MAX_MUSIC_SECONDS);
   const chunks: Float32Array[] = [];
@@ -143,25 +175,49 @@ export function renderMidiToOpl2(midi: MidiFile, sampleRate: number, fromTick = 
     samples: resample(native, OPL2_RATE, sampleRate),
     sampleRate,
     truncated,
-    unreadableSysex: driver.unreadableSysex,
-    instrumentsLoaded: driver.instrumentsLoaded,
+    unreadableSysex: synth.unreadableSysex,
+    instrumentsLoaded: synth.instrumentsLoaded,
   };
+}
+
+/**
+ * An MT-32 score's note-on, with its velocity as iMUSE plays it elsewhere.
+ *
+ * `Player::send` compresses it when the score is Roland's and the device is
+ * not, and the OPL2 is not.
+ */
+export function mt32Velocity(event: MidiEvent): MidiEvent {
+  if (event.command !== MIDI_NOTE_ON || event.data2 === 0) return event;
+  return { ...event, data2: mt32VelocityToGm(event.data2) };
+}
+
+/**
+ * The iMUSE sysex codes addressed to the sequencer rather than the synthesiser.
+ *
+ * From `sysexHandler_Scumm`: 48-53 are hooks (jump, transpose, part on/off,
+ * volume, programme, part transpose), 64 is a marker, 80 and 81 set and clear
+ * a loop. Everything else — part setup, instrument definitions — is the card's.
+ */
+export function isSequencerSysex(event: MidiEvent): boolean {
+  const code = imuseCode(event);
+  return code !== null && ((code >= 48 && code <= 53) || code === 64 || code === 80 || code === 81);
 }
 
 /**
  * Reads a SCUMM sound resource and renders its AdLib score.
  *
- * Returns null when the resource holds no score — a digitised effect, or a
- * piece that only ever had a Roland version.
+ * Returns null when the resource holds no score — a digitised effect. Whichever
+ * card's arrangement is found is played the way that card would: see
+ * `findArrangement` for the preference and `createSynth` for the cards.
  */
 export function renderScummMusic(
   resource: Uint8Array,
   sampleRate: number,
   fromTick = 0,
 ): RenderedMusic | null {
-  const midi = readScummMusic(resource);
-  if (!midi || midi.events.length === 0) return null;
-  return renderMidiToOpl2(midi, sampleRate, fromTick);
+  const score = readScummScore(resource);
+  if (!score || score.midi.events.length === 0) return null;
+  return renderMidiToOpl2(score.midi, sampleRate, fromTick, score.kind);
 }
 
 /**
@@ -346,7 +402,7 @@ export function jumpTargetTick(division: number, beat: number, tickInBeat = 0): 
  * close to every rate a browser uses, so the resampling ratio is near one and
  * the interpolation error stays far below the chip's own quantisation.
  */
-function resample(input: Float32Array, from: number, to: number): Float32Array {
+export function resample(input: Float32Array, from: number, to: number): Float32Array {
   if (Math.abs(from - to) < 1 || input.length === 0) return input;
 
   const ratio = from / to;

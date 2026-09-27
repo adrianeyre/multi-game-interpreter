@@ -253,25 +253,50 @@ describe('rendering a score through the OPL2', () => {
     expect(decodeSoundResource(resource)).not.toBeNull();
   });
 
-  it('plays on with the default instrument when a definition is unreadable', () => {
-    // The instrument layout SCUMM uses is not published, and this is the
-    // behaviour that matters when a message is not understood: the notes still
-    // sound, and the count says how often it happened.
-    const nonsense = [0x00, 0xf0, 0x02, 0x01, 0xf7, ...ONE_NOTE];
-    const rendered = renderMidiToOpl2(readMidi(smf(nonsense)), 48000);
+  /** An iMUSE sysex, nibble-encoded as the originals are, with its 0xF7. */
+  const nibbles = (bytes: number[]) => bytes.flatMap((b) => [(b >> 4) & 0x0f, b & 0x0f]);
+
+  /**
+   * Sysex 16: a part's AdLib instrument — channel, a hardware byte, then
+   * ScummVM's 30-byte `AdLibInstrument` nibble-encoded, 62 bytes after the
+   * code in all (`sysexHandler_Scumm`).
+   */
+  const instrumentSysex = (channel: number, instrument: number[]) => {
+    const message = [0x7d, 16, channel, 0, ...nibbles(instrument), 0xf7];
+    return [0x00, 0xf0, message.length, ...message];
+  };
+  const PIANO = [0xc2, 0xc5, 0x2b, 0x99, 0x58, 0xc2, 0x1f, 0x1e, 0xc8, 0x7c, 0x0a];
+  const instrument = (row: number[]) => [...row, ...new Array(30 - row.length).fill(0)];
+
+  it('plays on with the default instrument when a definition is the wrong size', () => {
+    // The length is what says which card an instrument is for; any other is
+    // invalid, which the original marks and which is counted here.
+    const short = [0x7d, 16, 0, 0, 1, 2, 3, 0xf7];
+    const events = [0x00, 0xf0, short.length, ...short, ...ONE_NOTE];
+    const rendered = renderMidiToOpl2(readMidi(smf(events)), 48000);
 
     expect(rendered.unreadableSysex).toBe(1);
     expect(rendered.instrumentsLoaded).toBe(0);
     expect(peak(rendered.samples)).toBeGreaterThan(0.01);
   });
 
-  it('takes an instrument definition that is the right shape', () => {
-    const definition = [0x7d, 0x00, 0x01, 0x01, 0x8f, 0x06, 0xf2, 0xf4, 0xf7, 0xf7, 0, 0, 0x0a];
-    const events = [0x00, 0xf0, definition.length, ...definition, ...ONE_NOTE];
+  it('takes an iMUSE AdLib instrument definition, and plays with it', () => {
+    const events = [...instrumentSysex(0, instrument(PIANO)), ...ONE_NOTE];
     const rendered = renderMidiToOpl2(readMidi(smf(events)), 48000);
+    const plain = renderMidiToOpl2(readMidi(smf(ONE_NOTE)), 48000);
 
     expect(rendered.instrumentsLoaded).toBe(1);
     expect(rendered.unreadableSysex).toBe(0);
+    expect(Array.from(rendered.samples)).not.toEqual(Array.from(plain.samples));
+  });
+
+  it('takes a global instrument and a programme change that selects it', () => {
+    // Sysex 17: hardware byte, a byte skipped, the slot, then the instrument.
+    const message = [0x7d, 17, 0, 0, 5, ...nibbles(instrument(PIANO)), 0xf7];
+    const events = [0x00, 0xf0, message.length, ...message, 0x00, 0xc0, 5, ...ONE_NOTE];
+    const rendered = renderMidiToOpl2(readMidi(smf(events)), 48000);
+
+    expect(rendered.instrumentsLoaded).toBe(1);
   });
 
   it('plays several notes at once', () => {

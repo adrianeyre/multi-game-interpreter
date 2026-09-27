@@ -11,8 +11,10 @@
  * ## Two places a digital recording lives
  *
  * - In `RESOURCE.AUD` (or `RESOURCE.SFX`), addressed by the **base audio map**
- *   — the `map` resource numbered 65535, six bytes an entry: a resource number
- *   and a 32-bit offset. This is the talkie case and it is where the volume is.
+ *   — the `map` resource numbered 65535, six bytes an entry (a resource number
+ *   and a 32-bit offset) in a SCI1.1 talkie and five from SCI2 on (a number and
+ *   a cumulative 24-bit step; `readSciAudioMap`). This is the talkie case and
+ *   it is where the volume is.
  * - As an `audio` resource in the ordinary resource map, read out of a Volume
  *   like any View. Smaller releases do this and the reader does not care.
  *
@@ -48,7 +50,15 @@
 
 import type { ProjectAudio } from '../audio.js';
 import type { SciResourceType } from '../../engine/sci/resource/sciResourceTypes.js';
-import { readSciAudioMap, SCI_BASE_AUDIO_MAP } from '../../engine/sci/sound/sciAudio.js';
+import {
+  readSciAudioMap,
+  SCI_BASE_AUDIO_MAP,
+  sciDiscAudioVolume,
+} from '../../engine/sci/sound/sciAudio.js';
+
+function baseOf(name: string): string {
+  return (name.replace(/\\/g, '/').split('/').pop() ?? name).toUpperCase();
+}
 
 /** Where one recording is, as the listing needs to describe it. */
 export interface SciAudioEntryInfo {
@@ -64,6 +74,11 @@ export interface SciAudioEntryInfo {
   readonly where: 'aud' | 'sfx' | 'volume';
   /** The recording's length, where it is known without reading the sample. */
   readonly bytes?: number;
+  /**
+   * The bulk file by name, where it is not `RESOURCE.AUD` or `RESOURCE.SFX` —
+   * a numbered-disc install's `RESAUD.00n` or `RESSFX.00n`.
+   */
+  readonly file?: string;
 }
 
 export interface SciAudioSources {
@@ -97,7 +112,7 @@ export function listSciAudio(sources: SciAudioSources): ProjectAudio[] {
     if (seen.has(entry.number)) continue;
     seen.add(entry.number);
 
-    const file = containerOf(entry.where);
+    const file = entry.file ?? containerOf(entry.where);
     const kind = entry.where === 'sfx' ? 'effects' : 'speech';
     rows.push({
       id: rows.length + 1,
@@ -131,6 +146,22 @@ export function describeSciAudio36(maps: number): string | null {
 export interface SciAudioResources {
   read(type: SciResourceType, number: number): Promise<Uint8Array | null>;
   list(type: SciResourceType): number[];
+  /**
+   * True from SCI2 on, where the base map is the five-byte cumulative form
+   * (`readSciAudioMap`). Absent reads as false, the six-byte form.
+   */
+  readonly isSci32?: boolean;
+  /**
+   * A numbered-disc install's discs and the reads that reach each one's own
+   * maps, which the base map of the whole-game table does not stand in for:
+   * each disc's map 65535 addresses that disc's own Volume.
+   */
+  readonly discs?: number[];
+  readOnDisc?(type: SciResourceType, number: number, disc: number): Promise<Uint8Array | null>;
+  readonly layout?: {
+    readonly multiDiscAudio: boolean;
+    readonly discAudioFiles: ReadonlyMap<string, string>;
+  };
 }
 
 /**
@@ -146,9 +177,28 @@ export async function readSciAudioEntries(
 ): Promise<{ entries: SciAudioEntryInfo[]; audio36Maps: number }> {
   const entries: SciAudioEntryInfo[] = [];
 
-  const base = await resources.read('map', SCI_BASE_AUDIO_MAP);
+  const multiDisc = resources.layout?.multiDiscAudio === true && resources.readOnDisc;
+  if (multiDisc) {
+    // Every disc's base map, lowest disc first, so the row for a number two
+    // discs both list is the disc the game plays it from (`listSciAudio`
+    // keeps the first; `findSciDiscRecording` says why that is the right one).
+    for (const disc of resources.discs ?? []) {
+      const base = await resources.readOnDisc!('map', SCI_BASE_AUDIO_MAP, disc);
+      const file = sciDiscAudioVolume(resources.layout!.discAudioFiles, SCI_BASE_AUDIO_MAP, disc);
+      if (!base || !file) continue;
+      for (const entry of readSciAudioMap(base, { sci32: resources.isSci32 === true })) {
+        if (entry.number === undefined) continue;
+        entries.push({
+          number: entry.number,
+          where: /^RESSFX/i.test(baseOf(file)) ? 'sfx' : 'aud',
+          file: baseOf(file),
+        });
+      }
+    }
+  }
+  const base = multiDisc ? null : await resources.read('map', SCI_BASE_AUDIO_MAP);
   if (base) {
-    for (const entry of readSciAudioMap(base)) {
+    for (const entry of readSciAudioMap(base, { sci32: resources.isSci32 === true })) {
       if (entry.number === undefined) continue;
       entries.push({ number: entry.number, where: entry.volume });
     }

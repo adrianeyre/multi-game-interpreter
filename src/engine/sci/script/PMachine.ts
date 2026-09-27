@@ -51,6 +51,21 @@ export function reg(segment: number, offset: number): Reg {
   return { segment, offset };
 }
 
+/**
+ * What a Kernel handler answers to be **called again**, rather than a value.
+ *
+ * Sierra's interpreter could block inside a Kernel call — `InputText` until
+ * Enter, `Portrait` until the line is spoken, `DoAudio(Play)` until the sample
+ * is off the disc — and the script after the call assumes the world moved on
+ * underneath it. A Kernel call here cannot wait, so a handler that would have
+ * blocked answers this instead: the machine puts the call's arguments back,
+ * rewinds to the `callk`, and ends the run. The next cycle executes the same
+ * `callk` with the same arguments, and the handler finishes then.
+ *
+ * Compared by identity, so no real register can be mistaken for it.
+ */
+export const KERNEL_RETRY: Reg = Object.freeze({ segment: -1, offset: -1 });
+
 export function isNull(value: Reg): boolean {
   return value.segment === 0 && value.offset === 0;
 }
@@ -389,6 +404,8 @@ export class PMachine {
    * Cleared by whichever consumes it, exactly as ScummVM clears `r_rest`.
    */
   private restAdjust = 0;
+  /** Set when a Kernel call asked to be retried, which ends the current run. */
+  private waiting = false;
 
   /**
    * A trace hook, matching `ScummEngine.trace`/`traceScripts`.
@@ -906,7 +923,8 @@ export class PMachine {
   /** Runs at most `budget` instructions, and says how many it ran. */
   run(budget: number, until?: () => boolean): number {
     let executed = 0;
-    while (executed < budget && this.frames.length > 0 && !this.halted) {
+    this.waiting = false;
+    while (executed < budget && this.frames.length > 0 && !this.halted && !this.waiting) {
       if (!this.stepOnce()) break;
       executed++;
       // **A budget is a runaway guard, not a frame boundary.** A SCI game's
@@ -1338,8 +1356,18 @@ export class PMachine {
         // The argument count itself is on the stack under the arguments, which
         // is why this reads `count` and then pops one more.
         for (let i = 0; i < count; i++) args.unshift(this.pop());
-        this.pop();
+        const countWord = this.pop();
         const result = this.host.callKernel(operands[0], args);
+        if (result === KERNEL_RETRY) {
+          // Put the call back exactly as it was found — the count, the
+          // arguments, and a `&rest` it spent — and stand on the `callk` again.
+          this.push(countWord);
+          for (const arg of args) this.push(arg);
+          if (spendsRest) this.restAdjust = count - argBytes / 2;
+          frame.pc -= instruction.length;
+          this.waiting = true;
+          return;
+        }
         if (result === null) {
           if (!this.reportedKernels.has(operands[0])) {
             this.reportedKernels.add(operands[0]);

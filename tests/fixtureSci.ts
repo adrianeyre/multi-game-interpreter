@@ -373,6 +373,154 @@ export function sci32Resources(): SciResourceSpec[] {
   ];
 }
 
+/** A Sierra SOL sample: marker, header size 11, `SOL\0`, rate, flags, length. */
+export function solSample(body: number[], rate = 11025): number[] {
+  return [0x8d, 11, 0x53, 0x4f, 0x4c, 0x00, ...u16le(rate), 0x00, ...u32le(body.length), ...body];
+}
+
+function u24le(value: number): number[] {
+  return [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff];
+}
+
+/**
+ * SCI32's base audio map, as `readAudioMapSCI11` reads it from SCI2 on: a
+ * number and a cumulative 24-bit step, closed by `ffff`.
+ */
+export function sci32BaseAudioMap(entries: Array<[number, number]>): number[] {
+  const bytes: number[] = [];
+  let previous = 0;
+  for (const [number, offset] of entries) {
+    bytes.push(...u16le(number), ...u24le(offset - previous));
+    previous = offset;
+  }
+  return [...bytes, 0xff, 0xff];
+}
+
+/**
+ * A SCI32 per-room speech map in ScummVM's "late" form: a 32-bit base, then
+ * per entry the tuple, a 24-bit step and, when the tuple's low byte carries
+ * `0x80`, a 16-bit sync size; closed by `ffffffff`.
+ */
+export function sci32RoomAudioMap(
+  entries: Array<{ tuple: number[]; offset: number; sync: number }>,
+): number[] {
+  const base = entries[0]?.offset ?? 0;
+  const bytes: number[] = [...u32le(base)];
+  let previous = base;
+  for (const entry of entries) {
+    const flags = entry.sync > 0 ? 0x80 : 0;
+    bytes.push(entry.tuple[0], entry.tuple[1], entry.tuple[2], entry.tuple[3] | flags);
+    bytes.push(...u24le(entry.offset - previous));
+    if (flags) bytes.push(...u16le(entry.sync));
+    previous = entry.offset;
+  }
+  return [...bytes, 0xff, 0xff, 0xff, 0xff];
+}
+
+/** One disc of `buildSci32TwoDiscFixture`, and where its audio is. */
+export interface SciFixtureDisc {
+  number: number;
+  resources: SciResourceSpec[];
+  /** The disc's `RESAUD.00n`. */
+  aud: Uint8Array;
+  /** Base-map number to offset in `aud`. */
+  base: Map<number, number>;
+  /** Room 300's speech on this disc, with the sync bytes each line carries. */
+  speech: Array<{ tuple: number[]; offset: number; sync: number[] }>;
+}
+
+export interface SciTwoDiscFixture extends SciFixture {
+  discs: SciFixtureDisc[];
+}
+
+/**
+ * A numbered-disc SCI32 install: `RESMAP.001`/`RESSCI.001`/`RESAUD.001` and
+ * the same three for disc 2, with no `RESOURCE.AUD` — ScummVM's
+ * `_multiDiscAudio` shape (King's Quest VII's CD, Phantasmagoria, GK2).
+ *
+ * Laid out per `addAppropriateSources` and `readResourceMapSCI1`: each map is
+ * a SCI32 directory map over the Volume of its own number. Both discs carry
+ * their own map 65535 and their own map 300, **different tables under one
+ * number**, each addressing its own disc's `RESAUD`. Recording 2 is on both
+ * discs (disc 1's is the one played, since ScummVM's `addResource` keeps the
+ * first); `text 5` is on both with different bytes (disc 2's is the one read,
+ * since a later disc updates a Volume entry); `view 9` is on disc 2 alone.
+ */
+export function buildSci32TwoDiscFixture(): SciTwoDiscFixture {
+  const discs: SciFixtureDisc[] = [];
+  const files = new Map<string, Uint8Array>();
+
+  const layouts: Array<{
+    number: number;
+    own: SciResourceSpec[];
+    recordings: Array<[number, number[]]>;
+    lines: Array<{ tuple: number[]; body: number[]; sync: number[] }>;
+  }> = [
+    {
+      number: 1,
+      own: [...sci32Resources(), { type: 'text', number: 5, body: [0x41, 0x00] }],
+      recordings: [
+        [1, [0x80, 0x81]],
+        [2, [0x40, 0x41, 0x42]],
+      ],
+      lines: [
+        {
+          tuple: [3, 1, 0, 1],
+          body: [0x10, 0x20, 0x30],
+          sync: [0x0a, 0x00, 0x05, 0x00, 0xff, 0xff],
+        },
+        { tuple: [3, 2, 0, 1], body: [0x55], sync: [] },
+      ],
+    },
+    {
+      number: 2,
+      own: [
+        { type: 'text', number: 5, body: [0x42, 0x00] },
+        { type: 'view', number: 9, body: v56View(52) },
+      ],
+      recordings: [
+        [2, [0x90, 0x91, 0x92, 0x93]],
+        [3, [0x60, 0x61]],
+      ],
+      lines: [{ tuple: [7, 1, 0, 1], body: [0x70, 0x71], sync: [0x01, 0x00, 0xff, 0xff] }],
+    },
+  ];
+
+  for (const { number, own, recordings, lines } of layouts) {
+    const aud: number[] = [];
+    const base = new Map<number, number>();
+    const speech: SciFixtureDisc['speech'] = [];
+    for (const [recording, body] of recordings) {
+      base.set(recording, aud.length);
+      aud.push(...solSample(body));
+      const line = lines[speech.length];
+      if (line) {
+        speech.push({ tuple: line.tuple, offset: aud.length, sync: line.sync });
+        aud.push(...line.sync, ...solSample(line.body));
+      }
+    }
+    const resources: SciResourceSpec[] = [
+      ...own,
+      { type: 'map', number: 65535, body: sci32BaseAudioMap([...base]) },
+      {
+        type: 'map',
+        number: 300,
+        body: sci32RoomAudioMap(speech.map((entry) => ({ ...entry, sync: entry.sync.length }))),
+      },
+    ];
+    const n = String(number).padStart(3, '0');
+    const disc = buildSci32Fixture(resources, {
+      mapFile: `RESMAP.${n}`,
+      volumeFile: `RESSCI.${n}`,
+    });
+    for (const [name, data] of disc.files) files.set(name, data);
+    files.set(`RESAUD.${n}`, new Uint8Array(aud));
+    discs.push({ number, resources, aud: new Uint8Array(aud), base, speech });
+  }
+
+  return { files, resources: discs.flatMap((disc) => disc.resources), discs };
+}
+
 /**
  * A SCI3 game, which is SCI32's container over a Script resource of its own.
  *
@@ -426,8 +574,8 @@ function sci3Script(): number[] {
   objectsAt += localCount * 2;
   objectsAt += objectsAt % 4 === 0 ? 0 : 4 - (objectsAt % 4);
 
-  // One object where the header's arithmetic lands: the `0x1234` magic, a word
-  // count that includes those two words, then the variables. Positions three,
+  // One object where the header's arithmetic lands: the `0x1234` magic, a
+  // byte count that includes those two words, then the variables. Positions three,
   // four and five are the species, superclass and info flags the reader takes.
   //
   // **A SCI3 object is a header, a selector bank and its groups**, which is
@@ -464,7 +612,8 @@ function sci3Script(): number[] {
   put16(22, 0); // the placeholder the relocation table replaces
 
   put16(objectsAt, 0x1234);
-  put16(objectsAt + 2, objectWords);
+  // The size word is in bytes at SCI3 (`initializeObjectsSci3`), not words.
+  put16(objectsAt + 2, objectWords * 2);
   put16(objectsAt + 4 + 3 * 2, 1); // species
   put16(objectsAt + 4 + 4 * 2, 0); // superclass
 

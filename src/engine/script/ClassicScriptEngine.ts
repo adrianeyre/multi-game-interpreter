@@ -1418,10 +1418,10 @@ export abstract class ClassicScriptEngine extends ScriptScheduler {
           break;
         }
         case 23: {
-          // Shadow mode: a byte. Recorded but not yet used — the shadow
-          // palettes it selects are not implemented — while still consuming
-          // the right number of bytes, which is what the rest of the script
-          // depends on.
+          // Shadow mode: a byte. From v5 the costume renderer reads it (bit
+          // 0x20 shades every opaque pixel through the shadow palette); read
+          // for every version all the same, because consuming the right number
+          // of bytes is what the rest of the script depends on.
           const mode = this.getVarOrDirectByte(PARAM_1);
           if (actor) actor.shadowMode = mode;
           break;
@@ -2192,7 +2192,8 @@ export abstract class ClassicScriptEngine extends ScriptScheduler {
   }
 
   protected o_soundKludge(): void {
-    this.engine.sound.kludge(this.getStackList(16));
+    // The result is the one `processSoundQues` leaves for the script.
+    this.engine.variables[VAR.SOUNDRESULT] = this.engine.sound.kludge(this.getStackList(16));
   }
 
   // --- resources and system -------------------------------------------------

@@ -151,11 +151,14 @@ describe('reading an AKOS costume', () => {
 });
 
 describe('decoding a cel', () => {
-  it('decodes the pixels, transparent where the cel is transparent', () => {
+  it('decodes a codec 5 cel as rows, with 0 a colour like any other', () => {
+    // The BOMP blitter decodes with zeros written and treats 255 as the
+    // transparent colour, so a codec 5 cel's zeros are painted.
     const costume = parseAkos(buildAkos())!;
-    const pixels = decodeAkosCel(costume, 0)!;
+    const image = decodeAkosCel(costume, 0)!;
 
-    expect(Array.from(pixels)).toEqual([6, 6, 6, 6, 6, 6, 0, 0]);
+    expect(image.layout).toBe('rows');
+    expect(Array.from(image.pixels)).toEqual([6, 6, 6, 6, 6, 6, 0, 0]);
   });
 
   it('refuses a codec it does not decode, rather than producing noise', () => {
@@ -163,7 +166,7 @@ describe('decoding a cel', () => {
      * A cel decoded with the wrong codec is not a worse picture, it is noise —
      * and noise that renders looks like a rendering bug for a long time.
      */
-    const costume = parseAkos(buildAkos({ codec: AkosCodec.RunMajMin }))!;
+    const costume = parseAkos(buildAkos({ codec: AkosCodec.Trle }))!;
 
     expect(costume.decodable).toBe(false);
     expect(decodeAkosCel(costume, 0)).toBeNull();
@@ -191,7 +194,7 @@ describe('drawing an AKOS cel', () => {
    */
   it('puts an AKOS cel on the screen through the shared renderer', () => {
     const costume = parseAkos(buildAkos())!;
-    const pixels = decodeAkosCel(costume, 0)!;
+    const { pixels } = decodeAkosCel(costume, 0)!;
     const screen = new Screen();
 
     // A palette that maps the cel's colour 6 to a value we can look for.
@@ -216,7 +219,7 @@ describe('drawing an AKOS cel', () => {
 
   it('draws nothing where the cel is transparent', () => {
     const costume = parseAkos(buildAkos())!;
-    const pixels = decodeAkosCel(costume, 0)!;
+    const { pixels } = decodeAkosCel(costume, 0)!;
     const screen = new Screen();
     screen.pixels.fill(3);
 

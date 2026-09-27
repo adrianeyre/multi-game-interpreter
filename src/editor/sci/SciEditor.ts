@@ -83,8 +83,10 @@ import {
 import {
   describeSciViewInPlace,
   describeUnwritableSciView,
+  readSci11Cel,
   readSciView,
   writeSciView,
+  type SciViewResource,
 } from '../../engine/sci/gfx/SciView.js';
 import { readSciFont, writeSciFont } from '../../engine/sci/gfx/SciFont.js';
 import { readSciPalette, writeSciPalette } from '../../engine/sci/gfx/sciPalette.js';
@@ -106,6 +108,21 @@ import { accordion, OpenSections } from '../shell.js';
 import { STORAGE_KEYS } from '../../ui/storageKeys.js';
 import type { AudioSection } from '../audioSection.js';
 import { describeSciAudio36 } from '../../authoring/sci/audioList.js';
+import { patchSciCelPicturePixels, patchSciV56CelPixels } from '../../authoring/sci/sciViewCel.js';
+import { swordPictureView } from '../swordPictureView.js';
+import { readSciCelPicture } from '../../engine/sci/gfx/SciCelPicture.js';
+import {
+  addSciRoom,
+  deleteSciRoom,
+  describeSciRoomAdding,
+} from '../../authoring/sci/sciRoomAdd.js';
+import {
+  addSciInstance,
+  deleteSciInstance,
+  describeSciObjectAdding,
+  isAddedSciInstance,
+  isLastAddedSciInstance,
+} from '../../authoring/sci/sciObjects.js';
 import { SCI_BASE_AUDIO_MAP } from '../../engine/sci/sound/sciAudio.js';
 import { writePng, type RenderedImage } from '../imageExport.js';
 import {
@@ -114,7 +131,9 @@ import {
   renderSciFontSheet,
   renderSciVectorPicture,
   renderSciViewCel,
+  sciCelPictureColours,
   sciImageFilename,
+  sciIsVga,
   sciViewColours,
 } from './sciImages.js';
 
@@ -234,6 +253,22 @@ export class SciEditor {
    */
   private stopCelStrip: (() => void) | null = null;
 
+  /**
+   * What the paint panel was doing, kept across the rebuild every committed
+   * stroke causes: which cel it was on, its zoom, where the keyboard cursor
+   * was and the colour in the brush. Reset when the cel changes, because a
+   * cursor at 300, 200 means nothing on a 40-pixel cel.
+   */
+  private paint: {
+    key: string;
+    zoom?: number;
+    cursor?: { x: number; y: number };
+    colour?: number;
+  } = { key: '' };
+
+  /** Which item of a cel Picture the paint panel is on, and whose Picture. */
+  private paintItem = { picture: -1, item: 0 };
+
   /** The last refusal from opening a folder, shown beside the button again. */
   private folderProblem: string | null = null;
 
@@ -275,9 +310,15 @@ export class SciEditor {
     // replaced wholesale on every change, so a thing moved with the arrow keys
     // would take the focus away with it on the first press.
     const hadRoomFocus = this.roomCanvas?.owns(document.activeElement) ?? false;
+    // The paint canvas the same way: a key that paints commits, the commit
+    // rebuilds the pane, and without this the second key goes nowhere.
+    const hadPaintFocus =
+      document.activeElement !== null &&
+      this.detail.querySelector('.sci-paint canvas') === document.activeElement;
     this.renderList();
     this.renderDetail();
     if (hadRoomFocus) this.roomCanvas?.focus();
+    if (hadPaintFocus) this.detail.querySelector<HTMLElement>('.sci-paint canvas')?.focus();
   }
 
   // ------------------------------------------------------------- the list --
@@ -461,7 +502,7 @@ export class SciEditor {
     // What is left really is carried through, and says so.
     const carried = sci.resources.filter(
       (resource) =>
-        !['view', 'font', 'cursor'].includes(resource.type) &&
+        !['view', 'font', 'cursor', 'palette'].includes(resource.type) &&
         !(resource.type === 'vocab' && VOCABULARY_NUMBERS.has(resource.number)),
     );
     this.list.appendChild(
@@ -814,7 +855,9 @@ export class SciEditor {
           this.render();
           announce(`${label} replaced from ${file.name}.`);
         } catch (error) {
-          announce(`${label} could not be replaced: ${String(error)}`);
+          announce(
+            `${label} could not be replaced: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       })();
     });
@@ -976,18 +1019,18 @@ export class SciEditor {
       `nothing to hand a decoder.`;
     this.detail.appendChild(what);
 
-    // Said here rather than discovered after an export. Replacing a recording
-    // puts the new bytes in front of the old ones everywhere this editor plays
-    // them, and an exported install still carries `RESOURCE.AUD` through byte
-    // for byte (#227) — nothing in this project rebuilds one. The two Broken
-    // Swords are in the same position, and a button that looked like it
-    // changed the game would be the worse half of that.
+    // Said here rather than discovered after an export. A replaced recording
+    // is written into the install by `rebuildSciAudio` (#227): an `audio`
+    // resource into the resource Volume, a bulk one into the audio Volume
+    // with its base-map entry repointed. What it refuses is said by name at
+    // export, so this names only the shape of it.
     const replacing = document.createElement('p');
     replacing.className = 'sci-note';
     replacing.textContent =
-      'Replacing a recording changes what plays here and what a save writes out of this ' +
-      'project. It does not change the exported install: a game’s audio Volumes are copied ' +
-      'through unrebuilt (#227), because nothing in a SCI Project could rebuild one.';
+      'Replacing a recording changes what plays here and what an export writes: the new ' +
+      'sample goes into the audio Volume in the container the original used (SOL or RIFF), ' +
+      'and the base audio map is repointed at it. A replacement has to be a PCM WAV, and a ' +
+      'release whose base map is the five-byte cumulative form is refused by name (#227).';
     this.detail.appendChild(replacing);
 
     // Named rather than left out silently. A talkie's per-room speech is the
@@ -1067,6 +1110,17 @@ export class SciEditor {
       note.className = 'sci-note';
       note.textContent = inPlace;
       this.detail.appendChild(note);
+
+      // The one exception to "not re-encoded", said beside the sentence it
+      // qualifies: an import is written over the cel's own streams when the
+      // new body fits in them, and refused by name when it does not.
+      const importing = document.createElement('p');
+      importing.className = 'sci-note';
+      importing.textContent =
+        'A PNG imported over a cel is the exception: it is re-encoded and written over that ' +
+        'cel’s own bytes when the new body fits in the room the original occupied, and ' +
+        'refused, with both sizes, when it does not.';
+      this.detail.appendChild(importing);
     }
 
     // A View carries no palette of its own — on screen its colours are
@@ -1082,26 +1136,45 @@ export class SciEditor {
 
     // **An import where there is an encoder, and a sentence where there is
     // not.** `writeSciView` re-encodes a SCI0 or SCI1 cel's run-length body
-    // from its pixels, so those take a PNG; a V56 View is patched in place and
-    // its bodies are never re-encoded, which `describeSciViewInPlace` has
-    // already said above in its own words.
+    // from its pixels, so those take a PNG. A V56 cel is patched in place by
+    // `patchSciV56CelPixels`, which takes one when the re-encoded body fits in
+    // the bytes the original occupied and refuses by name — with both sizes —
+    // when it does not. A mirrored loop's V56 cel has no record of its own and
+    // is offered nothing, because an import would repaint the loop it mirrors.
     const chosenLoop = Math.min(this.selection.loop, Math.max(0, view.loops.length - 1));
     const chosenCel = view.loops[chosenLoop]?.cels[this.selection.cel];
-    if (!inPlace && chosenCel) {
+    const label = `loop ${chosenLoop} cel ${this.selection.cel}`;
+    if (chosenCel && (!inPlace || chosenCel.recordAt !== undefined)) {
       this.detail.appendChild(
         this.importButton(
-          `loop ${chosenLoop} cel ${this.selection.cel}`,
+          label,
           { width: chosenCel.width, height: chosenCel.height },
           colours.colours,
           (pixels, opaque) => {
-            for (let index = 0; index < chosenCel.pixels.length; index++) {
-              // The clear key is the cel's own, and transparency comes from the
-              // source's alpha rather than from the index it quantised to —
-              // a cel's clear key is a real colour everywhere else in the View.
-              chosenCel.pixels[index] = opaque(index)
+            // The clear key is the cel's own, and transparency comes from the
+            // source's alpha rather than from the index it quantised to — a
+            // cel's clear key is a real colour everywhere else in the View.
+            const next = new Uint8Array(chosenCel.pixels.length);
+            for (let index = 0; index < next.length; index++) {
+              next[index] = opaque(index)
                 ? (pixels[index] ?? chosenCel.clearKey)
                 : chosenCel.clearKey;
             }
+            if (inPlace) {
+              const patched = patchSciV56CelPixels(
+                view,
+                chosenCel,
+                next,
+                `View ${resource.number} ${label}`,
+              );
+              // Thrown so the import says it by name and changes nothing.
+              if (typeof patched === 'string') throw new Error(patched);
+              this.options.update(() => {
+                resource.bytes = toBase64(patched);
+              });
+              return;
+            }
+            chosenCel.pixels.set(next);
             this.options.update(() => {
               resource.bytes = toBase64(writeSciView(view));
             });
@@ -1114,6 +1187,16 @@ export class SciEditor {
     // reason and it was not a fact about SCI: no artwork was ever drawn on this
     // surface at all, so there was no frame to pick and nothing to play.
     this.detail.appendChild(this.loopPicker(view.loops.length));
+    // Row 10's artwork half: the cel the strip is showing, painted pixel by
+    // pixel on a zoomable canvas and written back through the same two
+    // writers the import uses. In a host of its own, so picking another cel
+    // replaces the panel without rebuilding the strip the focus is in.
+    const paintHost = document.createElement('div');
+    const fillPaint = (): void => {
+      paintHost.replaceChildren(
+        this.viewPaint(sci, resource, view, chosenLoop, inPlace !== null, colours.colours),
+      );
+    };
     const strip = sciCelStrip({
       id: `view-${resource.number}`,
       view,
@@ -1123,10 +1206,13 @@ export class SciEditor {
       title: `View ${resource.number}`,
       onSelect: (loop, cel) => {
         this.selection = { ...this.selection, loop, cel };
+        fillPaint();
       },
     });
     this.stopCelStrip = strip.stop;
     this.detail.appendChild(strip.element);
+    fillPaint();
+    this.detail.appendChild(paintHost);
 
     const table = document.createElement('table');
     table.className = 'sci-cel-items';
@@ -1191,6 +1277,293 @@ export class SciEditor {
       }
     }
     this.detail.appendChild(table);
+  }
+
+  /**
+   * The paint surface for one cel: the shared brush widget, zoomable, in the
+   * cel's own colours with its clear key as the hole.
+   *
+   * `write` is handed the whole cel after each stroke and returns a sentence
+   * when the writer refuses it, which the widget says and takes the stroke
+   * back for; on success it has already gone through `update`, so it is one
+   * undo step per stroke.
+   */
+  private paintPanel(options: {
+    key: string;
+    title: string;
+    width: number;
+    height: number;
+    pixels: Uint8Array;
+    clearKey: number;
+    palette: ReadonlyArray<readonly number[]>;
+    /** Which indices the brush offers; all 256 when absent. */
+    allowed?: readonly number[];
+    notes: readonly string[];
+    write: (pixels: Uint8Array) => string | null;
+  }): HTMLElement {
+    if (this.paint.key !== options.key) this.paint = { key: options.key };
+    const palette = options.palette.map((entry) => [entry[0] ?? 0, entry[1] ?? 0, entry[2] ?? 0]);
+
+    const rgba = new Uint8ClampedArray(options.width * options.height * 4);
+    for (let at = 0; at < options.pixels.length; at++) {
+      const index = options.pixels[at];
+      if (index === options.clearKey) continue;
+      const entry = palette[index] ?? [0, 0, 0];
+      rgba.set([entry[0], entry[1], entry[2], 255], at * 4);
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'sci-paint';
+    wrapper.appendChild(
+      swordPictureView({
+        id: `sci-paint-${options.key}`,
+        title: options.title,
+        frames: [],
+        selected: 0,
+        onSelect: () => undefined,
+        pixels: { width: options.width, height: options.height, pixels: options.pixels },
+        image: { width: options.width, height: options.height, rgba },
+        palette,
+        ...(options.allowed ? { allowed: options.allowed } : {}),
+        transparentZero: true,
+        transparentIndex: options.clearKey,
+        refusal: null,
+        filename: '',
+        // The import and export beside this panel are the SCI surface's own,
+        // quantised the way row 17 describes; the widget's would be a second
+        // pair doing the same thing slightly differently.
+        buttons: false,
+        onReplace: () => undefined,
+        onPaint: (painted) => options.write(painted) ?? undefined,
+        colour: this.paint.colour,
+        onColour: (colour) => {
+          this.paint.colour = colour;
+        },
+        zoomable: true,
+        zoom: this.paint.zoom,
+        onZoom: (zoom) => {
+          this.paint.zoom = zoom;
+        },
+        cursor: this.paint.cursor,
+        onCursor: (x, y) => {
+          this.paint.cursor = { x, y };
+        },
+        notes: options.notes,
+      }),
+    );
+    return wrapper;
+  }
+
+  /** A sentence where a paint panel would have been. */
+  private paintAbsence(text: string): HTMLElement {
+    const note = document.createElement('p');
+    note.className = 'sci-note sci-paint-absent';
+    note.textContent = text;
+    return note;
+  }
+
+  /**
+   * One View cel, painted.
+   *
+   * Two writers, as for the import: a pre-V56 View is rebuilt from its cels by
+   * `writeSciView`, and a V56 one is patched in place by
+   * `patchSciV56CelPixels`, which refuses — with both sizes — a stroke whose
+   * re-encoded body would outgrow the bytes the original occupied. A mirrored
+   * loop has no pixels of its own in either, so it is offered no brush.
+   */
+  private viewPaint(
+    sci: SciProject,
+    resource: SciProjectResource,
+    view: SciViewResource,
+    loopIndex: number,
+    inPlace: boolean,
+    colours: ReadonlyArray<readonly number[]>,
+  ): HTMLElement {
+    const loop = view.loops[loopIndex];
+    const cel = loop?.cels[this.selection.cel];
+    if (!loop || !cel) return this.paintAbsence('This loop has no such cel to paint.');
+    if (loop.mirrored || (inPlace && cel.recordAt === undefined)) {
+      return this.paintAbsence(
+        `Loop ${loopIndex} mirrors loop ${loop.mirrorOf}: its cels are that loop's, flipped, ` +
+          `and hold no pixels of their own, so painting one would repaint loop ` +
+          `${loop.mirrorOf}. Paint loop ${loop.mirrorOf} instead.`,
+      );
+    }
+
+    const label = `View ${resource.number} loop ${loopIndex} cel ${this.selection.cel}`;
+    // An EGA View holds four bits a pixel, so its brush offers the sixteen and
+    // the clear key rather than 256 entries of which 240 are repeats.
+    const allowed = sciIsVga(sci)
+      ? undefined
+      : [...new Set([...Array.from({ length: 16 }, (_, at) => at), cel.clearKey])];
+    return this.paintPanel({
+      key: `view-${resource.number}-${loopIndex}-${this.selection.cel}`,
+      title: label,
+      width: cel.width,
+      height: cel.height,
+      pixels: cel.pixels,
+      clearKey: cel.clearKey,
+      palette: colours,
+      ...(allowed ? { allowed } : {}),
+      notes: [
+        inPlace
+          ? 'Each stroke is re-encoded and written over this cel’s own bytes. A stroke whose ' +
+            'body would need more room than the original occupied is taken back, with both ' +
+            'sizes said: a V56 cel is patched in place because every record after it points ' +
+            'at a fixed offset.'
+          : 'Each stroke rebuilds this View from its cels, pixels and all.',
+      ],
+      write: (painted) => {
+        if (inPlace) {
+          const patched = patchSciV56CelPixels(view, cel, painted, label);
+          if (typeof patched === 'string') return patched;
+          this.options.update(() => {
+            resource.bytes = toBase64(patched);
+          });
+          return null;
+        }
+        const before = Uint8Array.from(cel.pixels);
+        cel.pixels.set(painted);
+        let bytes: Uint8Array;
+        try {
+          bytes = writeSciView(view);
+        } catch (error) {
+          cel.pixels.set(before);
+          const why = error instanceof Error ? error.message : String(error);
+          return `${label} could not be written: ${why}`;
+        }
+        this.options.update(() => {
+          resource.bytes = toBase64(bytes);
+        });
+        return null;
+      },
+    });
+  }
+
+  /**
+   * One item of a cel Picture, painted.
+   *
+   * A cel Picture's item is the V56 View's cel record (`SciCelPicture.ts`), so
+   * it is written by the same in-place patch and refused on the same terms. A
+   * SCI2 full-screen background is usually stored uncompressed, and that
+   * always fits; a run-length item fits when the stroke re-encodes no larger.
+   */
+  private celPicturePaint(sci: SciProject, picture: SciProjectCelPicture): HTMLElement {
+    const wrapper = document.createElement('div');
+    if (picture.items.length === 0) {
+      wrapper.appendChild(this.paintAbsence('This Picture holds no cels to paint.'));
+      return wrapper;
+    }
+    if (this.paintItem.picture !== picture.number) {
+      this.paintItem = { picture: picture.number, item: 0 };
+    }
+    const chosen = Math.min(this.paintItem.item, picture.items.length - 1);
+
+    if (picture.items.length > 1) {
+      const row = document.createElement('div');
+      row.className = 'sci-frame-strip sci-paint-items';
+      for (const [index, item] of picture.items.entries()) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sci-frame';
+        button.textContent = `Item ${index}`;
+        groupItem(button, {
+          role: 'radio',
+          selected: index === chosen,
+          label: `paint item ${index}, ${item.width} by ${item.height}`,
+        });
+        button.addEventListener('click', () => {
+          this.paintItem = { picture: picture.number, item: index };
+          this.render();
+        });
+        row.appendChild(button);
+      }
+      rovingGroup(row, { role: 'radiogroup', label: `item of cel Picture ${picture.number}` });
+      wrapper.appendChild(row);
+    }
+
+    const item = picture.items[chosen];
+    const bytes = fromBase64(picture.bytes);
+    const cel = readSci11Cel(bytes, item.headerAt, picture.container === 'sci32');
+    const label = `cel Picture ${picture.number} item ${chosen}`;
+    if (!cel) {
+      wrapper.appendChild(
+        this.paintAbsence(
+          `${label} has no cel header this project can read, so it cannot be painted.`,
+        ),
+      );
+      return wrapper;
+    }
+    const colours = sciCelPictureColours(
+      bytes,
+      readSciCelPicture(bytes).paletteOffset,
+      sciViewColours(sci),
+    );
+    // Row 17 for a cel Picture: the same picker, quantiser and in-place patch
+    // the View cel's import uses, against this Picture's own palette. A body
+    // that re-encodes larger than the bytes the item occupied is refused, with
+    // both sizes, by `patchSciCelPicturePixels`, and nothing is changed.
+    wrapper.appendChild(
+      this.importButton(
+        label,
+        { width: cel.width, height: cel.height },
+        colours,
+        (pixels, opaque) => {
+          const next = new Uint8Array(cel.width * cel.height);
+          for (let index = 0; index < next.length; index++) {
+            next[index] = opaque(index) ? (pixels[index] ?? cel.clearKey) : cel.clearKey;
+          }
+          const patched = patchSciCelPicturePixels(
+            fromBase64(picture.bytes),
+            picture.container,
+            item,
+            picture.items.map((each) => each.headerAt),
+            next,
+            label,
+          );
+          // Thrown so the import says it by name and changes nothing.
+          if (typeof patched === 'string') throw new Error(patched);
+          this.options.update(() => {
+            picture.bytes = toBase64(patched);
+          });
+        },
+      ),
+    );
+    wrapper.appendChild(
+      this.paintPanel({
+        key: `pic-${picture.number}-${chosen}`,
+        title: label,
+        width: cel.width,
+        height: cel.height,
+        pixels: cel.pixels,
+        clearKey: cel.clearKey,
+        palette: colours,
+        notes: [
+          'Each stroke is re-encoded and written over this item’s own bytes, and taken back, ' +
+            'with both sizes said, when it would need more room than the original occupied.' +
+            (picture.hasVectors
+              ? ' This Picture’s vector operations still paint the priority and control ' +
+                'screens; painting changes what is seen, not what is walked behind.'
+              : ''),
+        ],
+        write: (painted) => {
+          const patched = patchSciCelPicturePixels(
+            fromBase64(picture.bytes),
+            picture.container,
+            item,
+            picture.items.map((each) => each.headerAt),
+            painted,
+            label,
+          );
+          if (typeof patched === 'string') return patched;
+          this.options.update(() => {
+            picture.bytes = toBase64(patched);
+          });
+          return null;
+        },
+      }),
+    );
+    return wrapper;
   }
 
   /**
@@ -1726,6 +2099,8 @@ export class SciEditor {
     heading.textContent = `Room ${room.script} · ${room.name}`;
     this.detail.appendChild(heading);
 
+    this.detail.appendChild(this.roomActions(sci, room.script, room.picture));
+
     const pieces = sciRoomPieces(sci, room);
     const backdrop = sciRoomBackdrop(sci, room);
 
@@ -2150,6 +2525,7 @@ export class SciEditor {
     if (!object) return;
 
     this.detail.appendChild(this.objectSummary(object, sci));
+    this.detail.appendChild(this.instanceActions(script, object));
     this.detail.appendChild(this.propertyTable(script, object, sci));
 
     const method = object.methods[this.selection.methodIndex];
@@ -2271,7 +2647,9 @@ export class SciEditor {
         }
         this.options.update((project) => {
           const target = project.sci?.scripts.find((one) => one.number === script.number);
-          const live = target?.objects.find((one) => one.name === object.name);
+          // By position rather than by name: an instance this editor added
+          // shares its original's name, and a lookup by name would edit that.
+          const live = target?.objects[script.objects.indexOf(object)];
           if (live) live.variables[index] = next < 0 ? next + 0x10000 : next;
         });
         announce(`${this.propertyName(object, index, sci)} on ${object.name} set to ${next}.`);
@@ -2394,7 +2772,9 @@ export class SciEditor {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'sci-object';
-    button.textContent = `${object.isClass ? 'class' : 'instance'} ${object.name}`;
+    const added = isAddedSciInstance(script, index);
+    button.textContent =
+      `${object.isClass ? 'class' : 'instance'} ${object.name}` + (added ? ' (added)' : '');
     const selected = this.selection.objectIndex === index;
     button.classList.toggle('selected', selected);
     if (selected) button.setAttribute('aria-current', 'true');
@@ -2408,6 +2788,172 @@ export class SciEditor {
       this.render();
     });
     return button;
+  }
+
+  /**
+   * Add an instance by copying this one, and delete one this editor added.
+   *
+   * Row 12's SCI half, as far as the linker makes it free (`sciObjects.ts`):
+   * the copy is appended after the script's last block, where nothing points,
+   * so no offset already in the script moves. Where that does not hold the
+   * sentence saying why is on the pane before the button would be pressed —
+   * the same rule `describeSciRelinking` follows for a method body.
+   */
+  private instanceActions(script: SciProjectScript, object: SciProjectObject): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'sci-instance-actions';
+    const index = script.objects.indexOf(object);
+
+    const replace = (next: SciProjectScript | string, said: string): void => {
+      if (typeof next === 'string') {
+        announce(next);
+        return;
+      }
+      this.options.update((project) => {
+        const scripts = project.sci?.scripts;
+        if (!scripts) return;
+        const at = scripts.findIndex((one) => one.number === script.number);
+        if (at >= 0) scripts[at] = next;
+      });
+      this.selection = {
+        ...this.selection,
+        objectIndex: Math.min(this.selection.objectIndex, next.objects.length - 1),
+      };
+      if (said.startsWith('Added')) {
+        this.selection = { ...this.selection, objectIndex: next.objects.length - 1 };
+      }
+      this.render();
+      announce(said);
+    };
+
+    const refusal = describeSciObjectAdding(script);
+    if (refusal || object.isClass) {
+      const why = document.createElement('p');
+      why.className = 'sci-note';
+      why.textContent = object.isClass
+        ? 'A class is not copied: the class table names one script per species.'
+        : `No instance can be added to this script: ${refusal}.`;
+      wrapper.appendChild(why);
+    } else {
+      // An optional name, written as a new string (`sciObjects.ts`); empty
+      // keeps the original's, which is a pointer to the same string.
+      const naming = document.createElement('input');
+      naming.type = 'text';
+      naming.className = 'sci-instance-name';
+      naming.placeholder = 'name (optional)';
+      naming.setAttribute('aria-label', `name for the copy of ${object.name}`);
+      wrapper.appendChild(naming);
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.textContent = '+ Instance';
+      add.setAttribute(
+        'aria-label',
+        `add an instance to script ${script.number}, copied from ${object.name}`,
+      );
+      add.title =
+        'Appended after the last object, sharing this instance’s methods and with properties of its own';
+      add.addEventListener('click', () =>
+        replace(
+          addSciInstance(script, index, naming.value.trim() || undefined),
+          `Added a copy of ${object.name} to script ${script.number}.`,
+        ),
+      );
+      wrapper.appendChild(add);
+    }
+
+    if (isLastAddedSciInstance(script, index)) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Delete';
+      remove.setAttribute(
+        'aria-label',
+        `delete ${object.name}, the instance this editor added last`,
+      );
+      remove.addEventListener('click', () =>
+        replace(deleteSciInstance(script, index), `Deleted the added ${object.name}.`),
+      );
+      wrapper.appendChild(remove);
+    }
+    return wrapper;
+  }
+
+  /**
+   * + Room, as a copy of this one under a new Script number, and Delete for a
+   * room this editor added (`sciRoomAdd.ts`). The refusal, where there is one,
+   * is on the pane rather than behind the button.
+   */
+  private roomActions(sci: SciProject, number: number, picture: number | null): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'sci-room-actions';
+
+    const apply = (next: SciProject | string, said: string, select: number): void => {
+      if (typeof next === 'string') {
+        announce(next);
+        return;
+      }
+      this.options.update((project) => {
+        project.sci = next;
+      });
+      this.selection = { ...this.selection, number: select };
+      this.render();
+      announce(said);
+    };
+
+    const refusal = describeSciRoomAdding(sci, number);
+    if (refusal) {
+      const why = document.createElement('p');
+      why.className = 'sci-note';
+      why.textContent = `No room can be copied from this one: ${refusal}.`;
+      wrapper.appendChild(why);
+    } else {
+      const used = new Set(sci.scripts.map((one) => one.number));
+      let free = number + 1;
+      while (used.has(free)) free++;
+
+      const target = document.createElement('input');
+      target.type = 'number';
+      target.value = String(free);
+      target.setAttribute('aria-label', `script number for the copy of room ${number}`);
+      wrapper.appendChild(target);
+
+      const ownPicture = document.createElement('input');
+      ownPicture.type = 'number';
+      ownPicture.placeholder = picture === null ? 'no Picture' : `Picture (keeps ${picture})`;
+      ownPicture.disabled = picture === null;
+      ownPicture.setAttribute(
+        'aria-label',
+        `Picture number to copy room ${number}'s Picture to, or empty to share it`,
+      );
+      wrapper.appendChild(ownPicture);
+
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.textContent = '+ Room';
+      add.setAttribute('aria-label', `add a room copied from room ${number}`);
+      add.addEventListener('click', () => {
+        const to = Number(target.value);
+        const pic = ownPicture.value.trim() === '' ? undefined : Number(ownPicture.value);
+        apply(
+          addSciRoom(sci, number, to, pic === undefined ? {} : { picture: pic }),
+          `Added room ${to}, copied from room ${number}.`,
+          to,
+        );
+      });
+      wrapper.appendChild(add);
+    }
+
+    if (sci.scripts.find((one) => one.number === number)?.addedRoom) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Delete room';
+      remove.setAttribute('aria-label', `delete room ${number}, which this editor added`);
+      remove.addEventListener('click', () =>
+        apply(deleteSciRoom(sci, number), `Deleted room ${number}.`, number),
+      );
+      wrapper.appendChild(remove);
+    }
+    return wrapper;
   }
 
   /** A class number as the script that defines it, where one does. */
@@ -2624,6 +3170,19 @@ export class SciEditor {
         : '');
     this.detail.appendChild(summary);
 
+    // Rows 10 and 19, said where the brush would have been. A vector Picture
+    // has no pixels to paint into: its screen is what these operations draw,
+    // and a painted pixel would have to become an operation that draws it —
+    // an encoder from a bitmap to fills and lines nobody has written, and one
+    // whose output would not be the Picture the author drew over.
+    const vectors = document.createElement('p');
+    vectors.className = 'sci-note';
+    vectors.textContent =
+      'A vector Picture is a list of drawing operations and holds no pixels, so it is edited ' +
+      'as that list and not painted: a painted pixel would have to be turned back into lines ' +
+      'and fills. Cel Pictures, View cels, fonts and cursors are painted pixel by pixel.';
+    this.detail.appendChild(vectors);
+
     if (drawn.unknown) {
       // A Picture whose walk stopped is not editable: writing back a command
       // list that ends where the reader gave up would throw away everything
@@ -2763,6 +3322,7 @@ export class SciEditor {
       ),
     );
 
+    this.detail.appendChild(this.celPicturePaint(sci, picture));
     this.detail.appendChild(this.celItemTable(picture));
     this.detail.appendChild(this.carriedNote());
   }

@@ -99,9 +99,11 @@ function fixedString(text: string, length: number): number[] {
 
 /** `IMAG` > `WRAP` > `OFFS` > one `SMAP`, which is how v8 stores a picture. */
 function imag(smap: number[]): number[] {
-  // The `OFFS` table is a 32-bit entry per state, counted from the `OFFS`
-  // block's own first byte, and entry zero is the table's own size.
-  const offs = chunk('OFFS', [...u32le(8 + 4), ...u32le(8 + 4 + 4)]);
+  // The `OFFS` table is a 32-bit entry per state, from state 1, counted from
+  // the `OFFS` block's own first byte (`getObjectImage` reads state *n* at
+  // `ptr + 4 + 4 * n`, and `findResource` points at the tag). One state here,
+  // so the picture starts just past the twelve-byte block.
+  const offs = chunk('OFFS', u32le(8 + 4));
   return chunk('IMAG', chunk('WRAP', [...offs, ...smap]));
 }
 
@@ -125,7 +127,7 @@ function box(): number[] {
   ];
 }
 
-function roomBlock(): number[] {
+function roomBlock(objectPicture = buildSmap(2, 24, 9)): number[] {
   return chunk('ROOM', [
     ...chunk('RMHD', [
       ...u32le(801), // version
@@ -156,19 +158,19 @@ function roomBlock(): number[] {
         ...u32le(0), // flags
         ...new Array(15 * 2).fill(0).flatMap(() => u32le(0)),
       ]),
-      ...imag(buildSmap(2, 24, 9)),
+      ...imag(objectPicture),
     ]),
   ]);
 }
 
-function roomScriptsBlock(): number[] {
+function roomScriptsBlock(entryScript: number[]): number[] {
   // Verb number and offset, both 32-bit, terminated by a zero verb. The
   // offset is counted from the `VERB` chunk's *payload* — three words of table
   // is where the code starts — which is v8's own convention and one this
   // fixture would rather state than inherit.
   const verbTable = [...u32le(V8_VERB), ...u32le(4 * 3), ...u32le(0)];
   return chunk('RMSC', [
-    ...chunk('ENCD', V8_SCRIPT),
+    ...chunk('ENCD', entryScript),
     ...chunk('EXCD', V8_SCRIPT),
     ...chunk('LSCR', [...u32le(V8_LOCAL_SCRIPT), ...V8_SCRIPT]),
     ...chunk('OBCD', [
@@ -194,9 +196,27 @@ export interface V8Fixture {
   verbEntry: number;
 }
 
-export function buildV8Fixture(): V8Fixture {
-  const room = roomBlock();
-  const scripts = roomScriptsBlock();
+export interface V8FixtureOptions {
+  /** Bytecode for the room's entry script. Defaults to `V8_SCRIPT`. */
+  entryScript?: number[];
+  /**
+   * Draw the object as a 2x2 `BOMP` of this colour instead of an `SMAP`,
+   * which is what makes it a blast object. v8's `BOMP` payload is a 32-bit
+   * width and height and then the runs (`drawBlastObject`).
+   */
+  objectBompColour?: number;
+}
+
+function v8Bomp(colour: number): number[] {
+  const line = [...u16le(2), 0x03, colour]; // one run of two
+  return chunk('BOMP', [...u32le(2), ...u32le(2), ...line, ...line]);
+}
+
+export function buildV8Fixture(options: V8FixtureOptions = {}): V8Fixture {
+  const room = roomBlock(
+    options.objectBompColour === undefined ? undefined : v8Bomp(options.objectBompColour),
+  );
+  const scripts = roomScriptsBlock(options.entryScript ?? V8_SCRIPT);
 
   const lflf = chunk('LFLF', [...room, ...scripts]);
   // `LOFF` is a count and then a room number with a 32-bit offset each, and

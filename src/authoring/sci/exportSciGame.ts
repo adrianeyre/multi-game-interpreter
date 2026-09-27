@@ -68,6 +68,15 @@ export interface SciExportResult {
 export const CARRIED_VOLUMES = ['RESOURCE.AUD', 'RESOURCE.SFX', 'RESSCI.PAT', 'RESOURCE.MSG'];
 
 /**
+ * Every code body a script holds: each object's methods, then its exported
+ * procedures. One list, so the emitter, the in-place writer and both linkers
+ * cannot disagree about which bodies there are.
+ */
+export function sciBodiesOf(script: SciProjectScript): SciProjectMethod[] {
+  return [...script.objects.flatMap((object) => object.methods), ...(script.procedures ?? [])];
+}
+
+/**
  * Re-emits one method's instruction list.
  *
  * The low bit of the opcode byte is the operand width, so an instruction whose
@@ -262,7 +271,7 @@ export function isUntouched(script: SciProjectScript, version?: SciVersion): boo
     return false;
   }
 
-  return script.objects.every((object) =>
+  return [{ methods: sciBodiesOf(script) }].every((object) =>
     object.methods.every((method) => {
       if (method.unrecovered !== undefined) return false;
       const emitted = emitSciMethod(method, version);
@@ -587,13 +596,11 @@ function rewriteInPlace(
 ): Uint8Array | null {
   const out = new Uint8Array(original);
 
-  for (const object of script.objects) {
-    for (const method of object.methods) {
-      if (method.unrecovered) continue;
-      const emitted = emitSciMethod(method, version);
-      if (emitted.length !== originalLengthOf(method, version)) return null;
-      out.set(emitted, method.offset);
-    }
+  for (const method of sciBodiesOf(script)) {
+    if (method.unrecovered) continue;
+    const emitted = emitSciMethod(method, version);
+    if (emitted.length !== originalLengthOf(method, version)) return null;
+    out.set(emitted, method.offset);
   }
   writeWords(out, propertyWords(script, 'code'));
   return out;

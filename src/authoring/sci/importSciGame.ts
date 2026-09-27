@@ -15,6 +15,7 @@
  */
 
 import { toBase64 } from '../base64.js';
+import { emitSciMethod } from './exportSciGame.js';
 import type {
   SciProject,
   SciProjectMethod,
@@ -491,11 +492,16 @@ function readSci3ScriptGraph(
   const objects: SciProjectObject[] = [];
   let at = header.objectsAt;
 
+  // **A SCI3 object's size word is in bytes**, where a heap object's is in
+  // words — ScummVM's `initializeObjectsSci3` steps `seeker += size`, and the
+  // engine's own reader (`SciScripts.ts`) found the same on Lighthouse, where
+  // chaining by words lands in the middle of the second object and stops. This
+  // walk chained by words, so a real SCI3 script showed its first object only.
   while (at + 4 <= bytes.length && u16(at) === 0x1234) {
-    const words = u16(at + 2);
-    if (words < 2 || at + words * 2 > bytes.length) break;
+    const size = u16(at + 2);
+    if (size < 4 || size % 2 !== 0 || at + size > bytes.length) break;
     const variables: number[] = [];
-    for (let i = 0; i < words - 2; i++) variables.push(u16(at + 4 + i * 2));
+    for (let i = 0; i < (size - 4) / 2; i++) variables.push(u16(at + 4 + i * 2));
 
     // **The methods, which used to be an empty list.** SCI3 keeps them in a
     // selector bank rather than a dictionary, so nothing read them and row 21
@@ -524,13 +530,44 @@ function readSci3ScriptGraph(
       variablesAt: { resource: 'code', offset: at + 4 },
       methods,
     });
-    at += words * 2;
+    at += size;
   }
 
   const localsOffset = 22 + header.exports.length * 2;
   const localsAt = localsOffset % 4 === 0 ? localsOffset : localsOffset + (4 - (localsOffset % 4));
   const locals: number[] = [];
   for (let i = 0; i < header.localCount; i++) locals.push(u16(localsAt + i * 2));
+
+  // Exported procedures, resolved as ScummVM's `validateExportFunc` resolves
+  // them: a slot with a relocation record is its word plus the record's base,
+  // and one without is relative to the code.
+  const u32 = (at: number): number => (u16(at) | (u16(at + 2) << 16)) >>> 0;
+  const bases = new Map<number, number>();
+  for (let i = 0; i < header.relocationCount; i++) {
+    const record = header.relocationsAt + i * 10;
+    if (record + 8 <= bytes.length) bases.set(u32(record), u32(record + 4));
+  }
+  const candidates: number[] = [];
+  for (let i = 0; i < header.exports.length; i++) {
+    const slot = 22 + i * 2;
+    const target = u16(slot) + (bases.get(slot) ?? header.codeAt);
+    if (target >= header.codeAt && target < header.stringsAt) candidates.push(target);
+  }
+  const allMethods = objects.flatMap((object) => object.methods);
+  const code3: SciBlock[] = [
+    { type: 'code', offset: header.codeAt, size: Math.max(0, header.stringsAt - header.codeAt) },
+  ];
+  const { procedures, unread } = readProcedures(
+    bytes,
+    candidates,
+    allMethods,
+    selectors,
+    code3,
+    [...new Set([...allMethods.map((method) => method.offset), ...candidates])].sort(
+      (a, b) => a - b,
+    ),
+    version,
+  );
 
   return {
     number,
@@ -539,6 +576,8 @@ function readSci3ScriptGraph(
     locals,
     localsAt: { resource: 'code', offset: localsAt },
     bytes: kept,
+    ...(procedures.length > 0 ? { procedures } : {}),
+    ...(unread.length > 0 ? { unreadProcedures: unread } : {}),
     unrecovered:
       objects.length === 0
         ? 'a SCI3 layout whose object list did not start where the header says'
@@ -697,6 +736,18 @@ function readHeapScript(
     });
   }
 
+  // Procedures are the export entries that are code offsets, which is the
+  // same test the entry points above were built with.
+  const { procedures, unread } = readProcedures(
+    buffer,
+    script.exports.filter((entry) => entry > 0 && entry < codeEnd && !objectExports.has(entry)),
+    objects.flatMap((object) => object.methods),
+    selectors,
+    codeBlock,
+    entryPoints,
+    version,
+  );
+
   return {
     number,
     objects,
@@ -705,6 +756,8 @@ function readHeapScript(
     localsAt: { resource: 'heap', offset: localsAt },
     bytes: toBase64(code),
     heapBytes: toBase64(heap),
+    ...(procedures.length > 0 ? { procedures } : {}),
+    ...(unread.length > 0 ? { unreadProcedures: unread } : {}),
   };
 }
 
@@ -801,14 +854,75 @@ function readScript(
     }
   }
 
+  const exports = readSci0Exports(bytes, blocks);
+  const codeBlocks = blocks.filter((block) => block.type === 'code');
+  const inCode = exports.filter((at) =>
+    codeBlocks.some((block) => at >= block.offset && at < block.offset + block.size),
+  );
+  const { procedures, unread } = readProcedures(
+    bytes,
+    inCode,
+    objects.flatMap((object) => object.methods),
+    selectors,
+    codeBlocks,
+    entries,
+    version,
+  );
+
   return {
     number,
     objects,
-    exports: readSci0Exports(bytes, blocks),
+    exports,
     locals,
     localsAt: localsBlock ? { resource: 'code', offset: localsBlock.offset } : undefined,
     bytes: kept,
+    ...(procedures.length > 0 ? { procedures } : {}),
+    ...(unread.length > 0 ? { unreadProcedures: unread } : {}),
   };
+}
+
+/**
+ * The exported procedures: export targets inside the code that no object's
+ * dictionary names.
+ *
+ * Read with the same `readMethod` and the same entry points as the methods, so
+ * a procedure's body is bounded exactly as a method's is. **Kept only when it
+ * is a clean, separate span.** An export can be wrong — King's Quest IV's
+ * script 120 exports an offset one byte inside an instruction — and a body read
+ * from there would overlap a real method, which the linker rightly refuses;
+ * so such a body, or one that did not disassemble to its end, is listed as
+ * unread instead of being held as something an edit could be written into.
+ */
+function readProcedures(
+  script: Uint8Array,
+  candidates: readonly number[],
+  methods: readonly SciProjectMethod[],
+  selectors: string[],
+  code: readonly SciBlock[],
+  entryPoints: readonly number[],
+  version: SciVersion,
+): { procedures: SciProjectMethod[]; unread: number[] } {
+  const span = (method: SciProjectMethod): [number, number] => [
+    method.offset,
+    method.offset + emitSciMethod(method, version).length,
+  ];
+  const taken = methods.filter((method) => !method.unrecovered).map(span);
+  const starts = new Set(methods.map((method) => method.offset));
+  const procedures: SciProjectMethod[] = [];
+  const unread: number[] = [];
+  for (const [index, offset] of [...new Set(candidates)].sort((a, b) => a - b).entries()) {
+    if (starts.has(offset)) continue;
+    const body = readMethod(script, -1, offset, selectors, code, entryPoints, version);
+    const [from, to] = body.instructions.length > 0 ? span(body) : [offset, offset];
+    const overlaps = [...taken].some(([a, b]) => from < b && a < to);
+    if (body.unrecovered || body.instructions.length === 0 || overlaps) {
+      unread.push(offset);
+      continue;
+    }
+    procedures.push({ ...body, selector: `procedure${index}`, selectorNumber: -1 });
+    taken.push([from, to]);
+  }
+  return { procedures, unread };
 }
 
 function readObject(
