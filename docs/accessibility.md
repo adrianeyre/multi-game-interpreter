@@ -34,6 +34,7 @@ the same thing".
 | `src/editor/a11yWidgets.ts`    | Roving tabindex for the palettes, strips, tabs and the AGI pixel grid                                      |
 | `src/editor/canvasKeyboard.ts` | The keyboard cursor the six drawing canvases share, and the on-canvas focus indicator                      |
 | `src/ui/accessibility.ts`      | The statement in the footer of both pages                                                                  |
+| `src/ui/footerDialog.ts`       | The shared shell behind the privacy policy and terms dialogs in the same footer                            |
 
 ## Level A
 

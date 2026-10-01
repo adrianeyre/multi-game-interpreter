@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { mountAccessibilityStatement } from '../src/ui/accessibility.js';
 import { createNotice } from '../src/ui/notice.js';
+import { mountPrivacyPolicy } from '../src/ui/privacy.js';
+import { mountTerms } from '../src/ui/terms.js';
 
 /**
  * The dialogs, rendered.
@@ -237,5 +239,116 @@ describe('the notice dialog', () => {
 
     await expect(answer).resolves.toEqual({ platform: 'amiga' });
     expect(document.querySelector<HTMLElement>('.notice-overlay')!.hidden).toBe(true);
+  });
+});
+
+/**
+ * The privacy policy and the terms share one shell, so they share one set of
+ * assertions: the same modal contract as the accessibility statement, and the
+ * few sentences each document exists to say.
+ */
+describe.each([
+  {
+    name: 'the privacy policy',
+    mount: mountPrivacyPolicy,
+    id: 'privacy',
+    word: 'Privacy',
+    title: 'Privacy policy',
+    // Says the host sees requests, rather than claiming nobody does.
+    says: [/collects no personal information/i, /GitHub Pages/, /never uploaded/i],
+  },
+  {
+    name: 'the terms and conditions',
+    mount: mountTerms,
+    id: 'terms',
+    word: 'Terms',
+    title: 'Terms and conditions',
+    says: [/General Public License/, /not affiliated with/i, /as is/i, /right to use them/i],
+  },
+])('$name', ({ mount, id, word, title, says }) => {
+  let footer: HTMLElement;
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    footer = document.createElement('footer');
+    footer.innerHTML = '<button id="accessibility">Accessibility</button>';
+    document.body.append(footer);
+    mount(footer);
+  });
+
+  const link = (): HTMLButtonElement =>
+    [...footer.querySelectorAll('button')].find(
+      (button) => button.textContent === word,
+    ) as HTMLButtonElement;
+
+  const overlay = (): HTMLElement => document.querySelector<HTMLElement>(`#${id}-overlay`)!;
+
+  const dialog = (): HTMLElement => overlay().querySelector<HTMLElement>('[role="dialog"]')!;
+
+  it('adds a link to the footer, after the ones already there', () => {
+    expect(link()).toBeTruthy();
+    expect(link().previousElementSibling?.id).toBe('accessibility');
+    expect(link().getAttribute('aria-haspopup')).toBe('dialog');
+  });
+
+  it('starts the accessible name with the visible word', () => {
+    expect(link().getAttribute('aria-label')).toMatch(new RegExp(`^${word}\\b`));
+  });
+
+  it('starts closed', () => {
+    expect(overlay().hidden).toBe(true);
+  });
+
+  it('opens as a named, described modal dialog and takes focus into it', () => {
+    link().click();
+
+    expect(overlay().hidden).toBe(false);
+    expect(dialog().getAttribute('aria-modal')).toBe('true');
+
+    const labelledBy = dialog().getAttribute('aria-labelledby')!;
+    expect(document.getElementById(labelledBy)?.textContent).toBe(title);
+
+    const describedBy = dialog().getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)?.textContent).toBeTruthy();
+
+    expect(dialog().contains(document.activeElement)).toBe(true);
+  });
+
+  it('makes the page behind it inert, and gives focus back on Escape', () => {
+    link().focus();
+    link().click();
+    expect(footer.hasAttribute('inert')).toBe(true);
+
+    pressEscape();
+    expect(footer.hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(link());
+  });
+
+  it('closes on the backdrop and the cross, but not on a click inside the panel', () => {
+    link().click();
+    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(overlay().classList.contains('is-open')).toBe(true);
+
+    overlay().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(overlay().classList.contains('is-open')).toBe(false);
+
+    link().click();
+    overlay().querySelector<HTMLButtonElement>('.consent-close')!.click();
+    expect(overlay().classList.contains('is-open')).toBe(false);
+  });
+
+  it('says what it is for', () => {
+    const text = dialog().textContent ?? '';
+    expect(text).toMatch(/Last updated: /);
+    for (const pattern of says) expect(text).toMatch(pattern);
+  });
+
+  it('opens every outside link in a new tab, without an opener', () => {
+    const links = [...dialog().querySelectorAll('a')];
+    expect(links.length).toBeGreaterThan(0);
+    for (const anchor of links) {
+      expect(anchor.target).toBe('_blank');
+      expect(anchor.rel).toBe('noopener noreferrer');
+    }
   });
 });

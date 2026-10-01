@@ -54,6 +54,8 @@ import { Sword1Editor } from './sword1/Sword1Editor.js';
 import { Sword2Editor } from './sword2/Sword2Editor.js';
 import { mountConsent } from '../ui/consent.js';
 import { mountAccessibilityStatement } from '../ui/accessibility.js';
+import { mountPrivacyPolicy } from '../ui/privacy.js';
+import { mountTerms } from '../ui/terms.js';
 import { migrateLegacyStorage, STORAGE_KEYS } from '../ui/storageKeys.js';
 import { EditorState } from './state.js';
 import { exportObjectState, exportRoomBackground, exportSpriteCel } from './imageExport.js';
@@ -193,6 +195,10 @@ creditBar.className = 'creditbar';
 creditBar.appendChild(createCredit());
 mountConsent(creditBar);
 mountAccessibilityStatement(creditBar);
+// Then what the site collects about you, and the rules for using it — the
+// last two of the same kind of promise, in the order a reader looks for them.
+mountPrivacyPolicy(creditBar);
+mountTerms(creditBar);
 
 main.append(sidebar, centre, inspector);
 root.append(header, main, statusBar, creditBar, play.element);
