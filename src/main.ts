@@ -28,6 +28,8 @@ import { createNotice } from './ui/notice.js';
 import { createCredit } from './ui/credit.js';
 import { mountConsent } from './ui/consent.js';
 import { mountAccessibilityStatement } from './ui/accessibility.js';
+import { mountPrivacyPolicy } from './ui/privacy.js';
+import { mountTerms } from './ui/terms.js';
 import { SaveStore, SAVE_LOCATION_NOTE, listSavedGames } from './engine/save/SaveStore.js';
 import { createSaveMenu, describeSavedGame, slotsFrom, type SavedGameView } from './ui/saveMenu.js';
 import {
@@ -73,6 +75,10 @@ mountConsent(creditBar);
 // Beside the cookie link, because it is the same kind of promise about the site
 // and a reader looking for one will look where the other is.
 mountAccessibilityStatement(creditBar);
+// Then what the site collects about you, and the rules for using it — the
+// last two of the same kind of promise, in the order a reader looks for them.
+mountPrivacyPolicy(creditBar);
+mountTerms(creditBar);
 const logEl = document.querySelector<HTMLPreElement>('#log')!;
 const releasesButton = document.querySelector<HTMLButtonElement>('#releases-button')!;
 const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button')!;
