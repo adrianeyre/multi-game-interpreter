@@ -1,6 +1,6 @@
 {
   "name": "mgi-web",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": false,
   "description": "MGI (Multi Game Interpreter) — a web-based interpreter and editor for classic LucasArts, Sierra, Adventure Soft and Revolution adventure games, written in TypeScript",
   "keywords": [
