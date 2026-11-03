@@ -1,0 +1,34 @@
+/*
+ * MGI's look, mapped onto stageshow's tokens (stageshow references/looks.md,
+ * "From a codebase"). The values are the player's own, from
+ * `src/ui/styles.css`: the same page, panel, control and accent, so a demo on
+ * the landing page reads as the app beneath it rather than as a generic dark
+ * mock-up.
+ */
+
+.mgi-look .ss-stage {
+  --mgi-bg: #0f0f14;
+  --mgi-panel: #16161d;
+  --mgi-control: #1f1f28;
+  --mgi-edge: #4a4a58;
+
+  --ss-font:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --ss-radius-sm: 6px;
+  --ss-radius-md: 8px;
+  --ss-radius-lg: 12px;
+  --ss-radius-window: 12px;
+}
+
+.mgi-look .ss-stage[data-theme='dark'] {
+  --ss-canvas: #0f0f14;
+  --ss-surface: #16161d;
+  --ss-chrome: #1a1a22;
+  --ss-raised: #20202a;
+  --ss-well: #0b0b0f;
+  --ss-text: #9a9aa8;
+  --ss-text-strong: #ececf1;
+  --ss-text-faint: #6e6e7c;
+  --ss-accent-soft: rgba(226, 178, 99, 0.16);
+  --ss-accent-text: #ebc27e;
+}

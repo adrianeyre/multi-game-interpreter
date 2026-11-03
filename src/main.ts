@@ -901,6 +901,22 @@ document.querySelector<HTMLButtonElement>('#pick-files')!.addEventListener('clic
   document.querySelector<HTMLInputElement>('#file-input-flat')!.click();
 });
 
+// The landing page repeats the two pickers beside its headline. Each forwards
+// to its title-bar twin rather than opening an input of its own, so there is
+// one route into `startWithFiles` however the picker was reached.
+for (const proxy of document.querySelectorAll<HTMLButtonElement>('[data-proxy]')) {
+  proxy.addEventListener('click', () => {
+    document.getElementById(proxy.dataset.proxy ?? '')?.click();
+  });
+}
+
+// The landing page's illustrations: React and the stageshow kit, in a chunk of
+// their own, fetched once everything above is wired. Nothing depends on them —
+// a failed fetch leaves a complete page without its pictures.
+void import('./site/mount.js')
+  .then(({ mountLanding }) => mountLanding())
+  .catch((error: unknown) => log(`Landing illustrations unavailable: ${String(error)}`));
+
 for (const id of ['#file-input', '#file-input-flat']) {
   document.querySelector<HTMLInputElement>(id)!.addEventListener('change', (event) => {
     const input = event.target as HTMLInputElement;

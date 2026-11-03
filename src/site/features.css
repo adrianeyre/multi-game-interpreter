@@ -1,0 +1,416 @@
+/*
+ * The feature grid: rounded tiles on a gap, copy at the top of every tile,
+ * one ground with the stat as the accent punctuation (bento.md, rule 10).
+ */
+
+.mgi-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    'editor editor engines'
+    'saves private files';
+  gap: 16px;
+}
+
+.mf-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+  padding: 28px 28px 0;
+  overflow: hidden;
+  border-radius: 20px;
+  background: #15151c;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.mf-tile--editor {
+  grid-area: editor;
+  min-height: 380px;
+}
+.mf-tile--engines {
+  grid-area: engines;
+  padding-bottom: 28px;
+}
+.mf-tile--saves {
+  grid-area: saves;
+}
+.mf-tile--private {
+  grid-area: private;
+  padding-bottom: 28px;
+}
+.mf-tile--files {
+  grid-area: files;
+}
+
+.mf-tile[data-tone='accent'] {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(226, 178, 99, 0.22), transparent 60%), #1b1712;
+  box-shadow: inset 0 0 0 1px rgba(226, 178, 99, 0.18);
+}
+
+/* Page type, not UI type: 17 to 20px, a bold lead and a grey run-in. */
+.mf-copy {
+  max-width: 30rem;
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.45;
+  color: #a2a2b0;
+}
+
+.mf-copy b {
+  font-weight: 650;
+  color: #ececf1;
+}
+
+.mf-copy--foot {
+  margin-top: auto;
+  font-size: 1rem;
+}
+
+/* ---- Pictures: pinned to the tile's foot, cropped by the tile ---- */
+
+.mf-picture {
+  margin-top: auto;
+  padding-top: 24px;
+}
+
+.mf-picture .ss-fit,
+.mf-picture .ss-stage {
+  overflow: visible;
+}
+
+.mf-stage .ss-stage {
+  background: transparent;
+}
+
+.mf-picture--editor {
+  margin-right: -28px;
+}
+
+.mf-picture--saves {
+  display: flex;
+}
+
+/* ---- Editor ---- */
+
+.mf-editor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(100% + 40px);
+  height: 340px;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+.mf-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  font-size: 12px;
+}
+
+.mf-side__head {
+  padding: 8px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ss-text-faint);
+}
+
+.mf-side__row {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--ss-text-strong);
+}
+
+.mf-side__row[data-on] {
+  color: var(--ss-accent);
+  background: var(--ss-raised);
+  box-shadow: inset 2px 0 0 var(--ss-accent);
+}
+
+.mf-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.mf-tool {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 7px;
+  font-size: 12px;
+  color: var(--ss-icon);
+  border: 1px solid var(--mgi-edge);
+  border-radius: 6px;
+  background: var(--mgi-control);
+}
+
+.mf-tool[data-on] {
+  padding-right: 10px;
+  color: #1a1a20;
+  background: var(--ss-accent);
+  border-color: var(--ss-accent);
+}
+
+.mf-canvas {
+  position: relative;
+  margin: 16px;
+  aspect-ratio: 16 / 9;
+  max-width: 480px;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.mf-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The walk box: a dashed rectangle over the floor that draws itself in. */
+.mf-walkbox {
+  position: absolute;
+  left: 8%;
+  right: 12%;
+  top: 66%;
+  bottom: 8%;
+  border: 2px dashed var(--ss-accent);
+  border-radius: 2px;
+  background: rgba(226, 178, 99, 0.14);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.9s cubic-bezier(0.3, 0.6, 0.2, 1);
+}
+
+.mf-walkbox[data-on] {
+  clip-path: inset(-30px -4px -4px -4px);
+}
+
+.mf-walkbox__label {
+  position: absolute;
+  left: -2px;
+  top: -26px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: #1a1a20;
+  background: var(--ss-accent);
+  border-radius: 4px;
+}
+
+/* ---- Engines: one number ---- */
+
+.mf-stat {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
+.mf-stat__number {
+  font-size: 7rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: #e2b263;
+  font-variant-numeric: tabular-nums;
+}
+
+.mf-stat__label {
+  margin-top: 4px;
+  font-size: 1.35rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #ececf1;
+}
+
+.mf-stat__list {
+  margin: auto 0 0;
+  padding-top: 20px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #b8b0a2;
+}
+
+/* ---- Saves: one card ---- */
+
+.mf-saves {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 300px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--ss-raised);
+  box-shadow: var(--ss-shadow-ground);
+}
+
+.mf-saves__head {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+.mf-saves__count {
+  font-weight: 400;
+  color: var(--ss-text);
+}
+
+.mf-slot {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ss-text-strong);
+}
+
+.mf-slot[data-on] {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mf-slot__n {
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-text-faint);
+}
+
+.mf-slot__empty {
+  color: var(--ss-text);
+}
+
+.mf-slot__badge {
+  opacity: 0;
+  transition: opacity 0.3s ease 0.15s;
+}
+
+.mf-slot__badge[data-on] {
+  opacity: 1;
+}
+
+.mf-slot__badge .ss-badge {
+  color: var(--ss-accent);
+  background: rgba(226, 178, 99, 0.14);
+}
+
+/* ---- Private: a sentence in large type ---- */
+
+.mf-private__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: #e2b263;
+  background: rgba(226, 178, 99, 0.12);
+}
+
+.mf-statement {
+  margin: 20px 0 0;
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: #ececf1;
+}
+
+/* ---- Files: names bleeding off the right ---- */
+
+.mf-files {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: auto -28px 28px 0;
+  padding-top: 24px;
+}
+
+.mf-files__row {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.mf-file {
+  flex: none;
+  padding: 7px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: #d4d4dc;
+  background: #1f1f28;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+.mf-file[data-zip] {
+  color: #1a1a20;
+  background: #e2b263;
+  box-shadow: none;
+}
+
+/* ---- Narrow: two columns, then one ---- */
+
+@media (max-width: 60rem) {
+  .mgi-features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'editor editor'
+      'engines saves'
+      'private files';
+  }
+}
+
+@media (max-width: 40rem) {
+  .mgi-features {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'editor' 'engines' 'saves' 'private' 'files';
+  }
+
+  .mf-tile {
+    min-height: 0;
+    padding: 22px 22px 0;
+  }
+
+  .mf-tile--editor {
+    min-height: 340px;
+  }
+
+  .mf-tile--engines,
+  .mf-tile--private {
+    padding-bottom: 22px;
+  }
+
+  .mf-picture--editor {
+    margin-right: -22px;
+  }
+
+  .mf-files {
+    margin: auto -22px 22px 0;
+  }
+
+  .mf-stat__number {
+    font-size: 5rem;
+  }
+
+  .mf-statement {
+    font-size: 2rem;
+  }
+}

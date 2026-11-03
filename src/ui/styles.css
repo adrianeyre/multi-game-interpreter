@@ -7,12 +7,24 @@
 
 :root {
   color-scheme: dark;
-  --bg: #101014;
-  --panel: #17171d;
-  --border: #2a2a33;
-  --text: #e6e6ea;
-  --muted: #8b8b96;
-  --accent: #d8a657;
+  /*
+   * One palette for the player, the editor and the landing page's stageshow
+   * illustrations (`src/site/look.css` maps these onto the kit's tokens).
+   * `--muted` and `--accent` are body text, not decoration: both clear 4.5:1
+   * on every surface here, which `tests/accessibility-contrast.test.ts` reads
+   * back out of this file and checks.
+   */
+  --bg: #0f0f14;
+  --panel: #16161d;
+  --surface: #15151c;
+  --control: #1f1f28;
+  --control-hover: #262631;
+  --border: #282833;
+  --text: #ececf1;
+  --muted: #9a9aa8;
+  --accent: #e2b263;
+  --accent-ink: #1a1a20;
+  --radius: 8px;
   font-family:
     ui-sans-serif,
     system-ui,
@@ -98,13 +110,17 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.6rem 1rem;
-  background: var(--panel);
+  padding: 0.6rem 1.25rem;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
 .topbar h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   margin: 0;
   font-size: 1.05rem;
   letter-spacing: 0.08em;
@@ -116,11 +132,30 @@ body {
   margin-left: 0.35em;
 }
 
+.brand-mark {
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: none;
+  color: var(--accent);
+}
+
 .controls {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
+}
+
+/*
+ * Groups the row's controls by job: reference, files, sound and scale, the
+ * running game, the editor. A rule rather than more space, so the groups
+ * survive the row wrapping.
+ */
+.controls-divider {
+  width: 1px;
+  height: 1.4rem;
+  margin: 0 0.3rem;
+  background: var(--border);
 }
 
 /*
@@ -134,17 +169,45 @@ button,
 select {
   font: inherit;
   font-size: 0.85rem;
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.75rem;
   color: var(--text);
-  background: #22222b;
+  background: var(--control);
   border: 1px solid var(--control-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
   cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    filter 120ms ease;
 }
 
 button:hover:not(:disabled),
 select:hover {
   border-color: var(--accent);
+  background: var(--control-hover);
+}
+
+/*
+ * The one action that matters most on the screen it is on: opening a game.
+ * Filled, so it reads before the row of outlined controls beside it. The ink
+ * on the gold is 9:1.
+ */
+button.primary {
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+button.large {
+  font-size: 1rem;
+  padding: 0.7rem 1.2rem;
+  border-radius: 10px;
 }
 
 /*
@@ -184,58 +247,147 @@ button[aria-pressed='true']:hover:not(:disabled) {
 .dropzone {
   flex: 1;
   display: grid;
-  place-items: center;
-  padding: 2rem;
+  justify-items: center;
+  align-content: start;
+  padding: 3rem 1.5rem 4rem;
+  background:
+    radial-gradient(60rem 30rem at 85% -10%, rgba(226, 178, 99, 0.08), transparent 70%), var(--bg);
+  transition: box-shadow 120ms ease;
 }
 
-.dropzone.dragover .dropzone-inner {
-  border-color: var(--accent);
-  background: #1c1c24;
+/* A drag over the page lights its edge: the whole landing is the target. */
+.dropzone.dragover {
+  box-shadow: inset 0 0 0 3px var(--accent);
 }
 
-.dropzone-inner {
-  /*
-   * Wide enough for a game's own row to stay on one line.
-   *
-   * 46rem was set for the prose, which reads well narrow — but the panel below
-   * it holds rows like "King's Quest VII: The Princeless Bride · Sierra SCI2.1
-   * — not supported here · 43 files · 514.9 MB", and a long title plus an
-   * engine chip plus a file count wraps at that width and reads as two rows
-   * that are one thing. The prose keeps its own measure below; this is the box.
-   */
-  width: 100%;
-  max-width: 72rem;
-  box-sizing: border-box;
-  padding: 2.5rem;
-  text-align: center;
-  border: 2px dashed var(--border);
-  border-radius: 12px;
-  transition:
-    border-color 120ms ease,
-    background 120ms ease;
-}
-
-.dropzone-inner h2 {
-  margin-top: 0;
-  font-size: 1.4rem;
-}
+/* ----------------------------------------------------------------- landing */
 
 /*
- * The prose keeps the measure the box used to have.
- *
- * Widening the box was for the rows beneath it; a paragraph at 72rem is a
- * paragraph nobody finishes, so the sentences stay at the width they were
- * written for and centre inside the wider panel.
+ * The landing page: a hero beside its illustration, the feature grid, and the
+ * reference text the drop zone always carried. Wide enough for a game's own
+ * row in the `games/` list to stay on one line — "King's Quest VII: The
+ * Princeless Bride · Sierra SCI2.1 · 43 files · 514.9 MB" wraps at 46rem and
+ * reads as two rows that are one thing.
  */
-.dropzone-inner > p {
-  max-width: 46rem;
-  margin-left: auto;
-  margin-right: auto;
+.landing {
+  width: 100%;
+  max-width: 80rem;
+  display: grid;
+  gap: 4.5rem;
 }
 
-.dropzone-inner p {
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  align-items: center;
+  gap: 3rem;
+}
+
+.hero-copy {
+  text-align: left;
+}
+
+.eyebrow {
+  margin: 0 0 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.hero-copy h2 {
+  margin: 0;
+  font-size: clamp(2.1rem, 4vw, 3.2rem);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-weight: 750;
+  text-wrap: balance;
+}
+
+.hero-lead {
+  margin: 1.25rem 0 0;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: #c4c4cf;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.text-link {
+  margin-left: 0.25rem;
+  font-size: 0.95rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.hero-note {
+  margin: 1.25rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.hero-demo {
+  min-width: 0;
+  /* Holds the demo's height before React arrives, so the page does not jump. */
+  aspect-ratio: 720 / 490;
+}
+
+.section-heading {
+  margin: 0 0 1.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: left;
+}
+
+.feature-grid {
+  min-height: 20rem;
+}
+
+/* The reference text the drop zone has always carried, as a quiet panel. */
+.reference {
+  padding: 2rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+
+.reference > p {
+  max-width: 46rem;
+}
+
+.reference p {
   line-height: 1.6;
   color: #c6c6d0;
+}
+
+.reference > .section-heading {
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 68rem) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+
+  .hero-demo {
+    aspect-ratio: auto;
+  }
 }
 
 /*
@@ -273,7 +425,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
   width: 100%;
   padding: 0.6rem 0.85rem;
   box-sizing: border-box;
-  background: #1c1c24;
+  background: var(--surface);
   border: 1px solid var(--control-edge);
   border-radius: 8px;
   cursor: pointer;
@@ -288,7 +440,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
 .engine-details > summary:hover,
 .engine-details > summary:focus-visible {
   border-color: var(--accent);
-  background: #23232d;
+  background: var(--control-hover);
 }
 
 /* Open, the bar joins the panel below rather than floating above it. */
@@ -345,7 +497,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
   margin: 0;
   padding: 0.85rem 0.85rem 0.85rem 2.1rem;
   max-width: none;
-  background: #1c1c24;
+  background: var(--surface);
   border: 1px solid var(--control-edge);
   border-top: 0;
   border-bottom-left-radius: 8px;
@@ -428,7 +580,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
   font: inherit;
   text-align: left;
   color: inherit;
-  background: #1c1c24;
+  background: var(--surface);
   border: 1px solid var(--control-edge);
   border-radius: 8px;
   cursor: pointer;
@@ -440,7 +592,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
 .games-folder-entry:hover,
 .games-folder-entry:focus-visible {
   border-color: var(--accent);
-  background: #23232d;
+  background: var(--control-hover);
 }
 
 .games-folder-name {
@@ -492,7 +644,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
   width: 3rem;
   padding: 0;
   color: var(--accent);
-  background: #1c1c24;
+  background: var(--surface);
   border: 1px solid var(--control-edge);
   border-radius: 8px;
   transition:
@@ -523,10 +675,27 @@ button[aria-pressed='true']:hover:not(:disabled) {
  */
 @media (max-width: 30rem) {
   .dropzone {
-    padding: 1rem 0.75rem;
+    padding: 1.5rem 1rem 2.5rem;
   }
 
-  .dropzone-inner {
+  .landing {
+    gap: 3rem;
+  }
+
+  /*
+   * On a phone the title bar wraps to four rows; pinned, it would hold half the
+   * screen over everything it scrolls past. It scrolls away here instead, and
+   * the drop zone's own two pickers are the first thing below it.
+   */
+  .topbar {
+    position: static;
+  }
+
+  .controls-divider {
+    display: none;
+  }
+
+  .reference {
     padding: 1.25rem 1rem;
   }
 
@@ -545,7 +714,7 @@ button[aria-pressed='true']:hover:not(:disabled) {
 
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: #22222b;
+  background: var(--control);
   padding: 0.1em 0.35em;
   border-radius: 4px;
   font-size: 0.9em;
@@ -681,11 +850,11 @@ canvas {
 
 .button-link {
   font-size: 0.85rem;
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.75rem;
   color: var(--text);
-  background: #22222b;
+  background: var(--control);
   border: 1px solid var(--control-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-decoration: none;
 }
 

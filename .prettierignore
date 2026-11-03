@@ -3,3 +3,4 @@ dist-web
 coverage
 public/games
 CHANGELOG.md
+src/site/kit

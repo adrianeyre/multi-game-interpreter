@@ -1,0 +1,300 @@
+/*
+ * The hero demo. Corner bleed on a quiet desktop: the window one gutter in
+ * from the top, off the right and the bottom; the folder on the desktop to
+ * its left. Everything is scoped under `.mgi-hero`.
+ */
+
+.mgi-hero .ss-stage {
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    radial-gradient(70% 90% at 0% 0%, rgba(226, 178, 99, 0.09), transparent 60%), var(--ss-well);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.mgi-hero .mh-window {
+  position: absolute;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+.mgi-hero .mh-body {
+  overflow: hidden;
+  background: var(--mgi-bg);
+}
+
+/* ---- The player's title bar ---- */
+
+.mgi-hero .mh-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 44px;
+  padding: 0 12px 0 16px;
+  background: var(--mgi-panel);
+  border-bottom: 1px solid var(--ss-line);
+}
+
+.mgi-hero .mh-mark {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ss-text-strong);
+}
+
+.mgi-hero .mh-mark span {
+  margin-left: 0.35em;
+  color: var(--ss-accent);
+}
+
+.mgi-hero .mh-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mgi-hero .mh-controls > * {
+  flex: none;
+}
+
+.mgi-hero .mh-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  color: var(--ss-text-strong);
+  background: var(--mgi-control);
+  border: 1px solid var(--mgi-edge);
+  border-radius: 6px;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.mgi-hero .mh-btn[data-hover] {
+  border-color: var(--ss-accent);
+}
+
+.mgi-hero .mh-btn[data-on] {
+  color: #1a1a20;
+  background: var(--ss-accent);
+  border-color: var(--ss-accent);
+}
+
+/* ---- The page under it: the drop zone, then the game in its place ---- */
+
+.mgi-hero .mh-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 20px;
+}
+
+.mgi-hero .mh-screen {
+  position: relative;
+}
+
+.mgi-hero .mh-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  border: 1.5px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.mgi-hero .mh-drop[data-over],
+.mgi-hero .mh-drop[data-loading] {
+  border-color: var(--ss-accent);
+  background: color-mix(in srgb, var(--ss-accent) 7%, transparent);
+}
+
+.mgi-hero .mh-drop__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--ss-accent);
+  background: color-mix(in srgb, var(--ss-accent) 12%, transparent);
+}
+
+.mgi-hero .mh-drop__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ss-text-strong);
+}
+
+.mgi-hero .mh-load {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 260px;
+  padding-top: 6px;
+}
+
+.mgi-hero [data-layout='compact'] .mh-load {
+  width: 230px;
+}
+
+.mgi-hero .mh-load__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--ss-text);
+}
+
+.mgi-hero .mh-load__name {
+  font-family: var(--ss-mono);
+  font-size: 11.5px;
+}
+
+.mgi-hero .mh-load__size {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ss-text-strong);
+}
+
+.mgi-hero .mh-meter {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mgi-hero .mh-meter .ss-meter__fill {
+  background: var(--ss-accent);
+  transition-duration: 0.5s;
+  transition-timing-function: cubic-bezier(0.3, 0.6, 0.3, 1);
+}
+
+.mgi-hero .mh-engine {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.mgi-hero .mh-engine[data-on] {
+  opacity: 1;
+  transform: none;
+}
+
+.mgi-hero .mh-badge {
+  color: var(--ss-accent);
+  background: color-mix(in srgb, var(--ss-accent) 14%, transparent);
+}
+
+.mgi-hero .mh-game {
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  background: #000;
+}
+
+.mgi-hero .mh-scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mgi-hero .mh-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--ss-text-strong);
+}
+
+.mgi-hero .mh-status__faint {
+  color: var(--ss-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- The folder on the desktop, and the drag image that carries it ---- */
+
+.mgi-hero .mh-desk,
+.mgi-hero .mh-drag__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 112px;
+  font-size: 11.5px;
+}
+
+.mgi-hero .mh-desk {
+  position: absolute;
+  transition: opacity 0.2s ease;
+}
+
+.mgi-hero .mh-desk[data-lifted] {
+  opacity: 0.45;
+}
+
+.mgi-hero .mh-desk__name,
+.mgi-hero .mh-drag__name {
+  max-width: 112px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+  color: var(--ss-text-strong);
+}
+
+.mgi-hero .mh-folder {
+  display: block;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.35));
+}
+
+.mgi-hero .mh-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+.mgi-hero .mh-drag[data-show] {
+  opacity: 0.9;
+}
+
+.mgi-hero .mh-drag__inner {
+  will-change: transform;
+}
+
+.mgi-hero .mh-drag__name {
+  color: #1a1a20;
+  background: var(--ss-accent);
+}
+
+.mgi-hero .mh-drag[data-dropped] {
+  opacity: 0;
+  transition: opacity 0.22s ease-in;
+}
+
+.mgi-hero .mh-drag[data-dropped] .mh-drag__inner {
+  transform: scale(0.5);
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}

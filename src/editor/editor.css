@@ -4,13 +4,15 @@
 
 :root {
   color-scheme: dark;
-  --bg: #101014;
-  --panel: #17171d;
-  --panel-2: #1d1d25;
-  --border: #2a2a33;
-  --text: #e6e6ea;
-  --muted: #8b8b96;
-  --accent: #d8a657;
+  /* The player's palette (`src/ui/styles.css`), so the two pages are one site. */
+  --bg: #0f0f14;
+  --panel: #16161d;
+  --panel-2: #1d1d26;
+  --control-hover: #262631;
+  --border: #282833;
+  --text: #ececf1;
+  --muted: #9a9aa8;
+  --accent: #e2b263;
   --good: #6bffb0;
   --warn: #e0a355;
   font-family:
@@ -55,7 +57,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 1rem;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -73,7 +75,7 @@ body {
   color: var(--text);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 /*
@@ -89,8 +91,12 @@ textarea {
   color: var(--text);
   background: var(--panel-2);
   border: 1px solid var(--control-edge);
-  border-radius: 6px;
-  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    filter 120ms ease;
 }
 
 button {
@@ -100,6 +106,7 @@ button {
 
 button:hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--control-hover);
 }
 
 /*
@@ -117,6 +124,11 @@ button.primary {
   border-color: var(--accent);
   color: #1a1206;
   font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
 }
 
 textarea {

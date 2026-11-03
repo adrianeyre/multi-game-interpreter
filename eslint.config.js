@@ -16,6 +16,8 @@ export default tseslint.config(
       'public/**',
       '.sandcastle/worktrees/**',
       '.scratch/**',
+      // The stageshow kit, vendored as published (src/site/kit/LICENSE).
+      'src/site/kit/**',
     ],
   },
   js.configs.recommended,
