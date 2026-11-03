@@ -4,6 +4,13 @@ A web-based interpreter for classic adventure engines, written in TypeScript. It
 runs in the browser on a `<canvas>`, with no plugins, no WebAssembly and no
 server-side component.
 
+**[Open MGI in your browser →](https://multi-game-interpreter.adrianeyre.co.uk)**
+· [Source](https://github.com/adrianeyre/multi-game-interpreter)
+· [Issues](https://github.com/adrianeyre/multi-game-interpreter/issues)
+· [Changelog](CHANGELOG.md)
+
+![The MGI landing page: the headline "Classic adventure games, running in your browser." beside an animated demo of a game folder dropped into the player and booting](docs/screenshots/landing.png)
+
 **Eight Engine families have an interpreter here.** None of the games below is a
 program: each is a set of data files containing rooms, sprites and **bytecode**,
 run by an interpreter. This project is such an interpreter, written from scratch
@@ -63,6 +70,34 @@ your machine.
 
 Writing an interpreter for a documented file format is not the same thing as
 distributing the games, and this repository contains none of their content.
+
+## Screenshots
+
+The player's landing page is the drop zone: drop a folder, loose files or a
+`.zip` anywhere on it. Under the hero, a feature grid covers the rest of the
+app.
+
+![The feature grid: the editor drawing a walk box, eight engine families, ten named save slots, "Nothing is uploaded.", and the file names the engines read](docs/screenshots/features.png)
+
+The editor paints rooms, places objects, draws walk boxes and sprites, and plays
+the compiled game without leaving the page.
+
+![The game editor, with the room canvas, its tools and palette, the resource tree and the room inspector](docs/screenshots/editor.png)
+
+<p>
+  <img src="docs/screenshots/mobile.png" width="260" alt="The landing page on a phone: the headline and both pickers" />
+  <img src="docs/screenshots/mobile-demo.png" width="260" alt="The landing page's demo on a phone, recomposed for a narrow column" />
+</p>
+
+The illustrations on the landing page are authored product UI, not recordings.
+They are built with the [stageshow](https://github.com/benjitaylor/skills) kit,
+vendored under [`src/site/kit/`](src/site/kit/) with its licence, and composed
+in [`src/site/`](src/site/). They are their own chunk, loaded after the player is
+ready, so nothing on the page depends on them. The game screen in the demo is
+original pixel art.
+
+The screenshots come from a production build (`npm run build && npm run
+serve`), with the cookie notice dismissed.
 
 ## Quick start
 
@@ -905,7 +940,7 @@ contrast.
 
 ## The hosted site
 
-`main` deploys to <https://adrianeyre.github.io/multi-game-interpreter/> — the player at the
+`main` deploys to <https://multi-game-interpreter.adrianeyre.co.uk/> — the player at the
 root, the editor at `/editor.html`.
 
 The deploy is the last stage of the release workflow rather than a workflow of
